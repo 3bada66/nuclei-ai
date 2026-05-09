@@ -1,0 +1,10 @@
+[run]
+source = backend
+omit =
+    # ML inference code — requires torch/GPU, cannot run in CI
+    backend/services/analysis_service.py
+
+[report]
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:

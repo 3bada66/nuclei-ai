@@ -1,0 +1,36 @@
+__pycache__
+**/__pycache__
+**/*.pyc
+**/*.pyo
+*.egg-info
+.env
+.env.*
+!backend/.env.example
+
+# Heavy ML artefacts — not needed in the API image
+data/
+outputs/checkpoints/
+src/dataset.py
+src/train.py
+src/tune_*.py
+src/extract_*.py
+src/generate_*.py
+src/make_*.py
+src/visualize.py
+src/metrics.py
+src/postprocess.py
+src/xml_to_masks.py
+src/utils.py
+src/app.py
+src/batch_count.py
+src/batch_count_watershed.py
+
+# Frontend (built separately, deployed to Cloudflare Pages)
+frontend/
+
+# Dev files
+nuclei.db
+*.db
+.git
+.github
+docs/

@@ -1,0 +1,5 @@
+image_path,mask_path
+data/processed/images/TCGA-49-4488-01Z-00-DX1.png,data/processed/masks/TCGA-49-4488-01Z-00-DX1.png
+data/processed/images/TCGA-UZ-A9PN-01Z-00-DX1.png,data/processed/masks/TCGA-UZ-A9PN-01Z-00-DX1.png
+data/processed/images/TCGA-HE-7130-01Z-00-DX1.png,data/processed/masks/TCGA-HE-7130-01Z-00-DX1.png
+data/processed/images/TCGA-A7-A13E-01Z-00-DX1.png,data/processed/masks/TCGA-A7-A13E-01Z-00-DX1.png

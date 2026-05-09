@@ -1,0 +1,82 @@
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { login as loginApi, register } from "../api";
+import { useAuth } from "../contexts/AuthContext";
+
+export default function RegisterPage() {
+  const { login: authLogin } = useAuth();
+  const navigate = useNavigate();
+  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await register(username, email, password);
+      const res = await loginApi(email, password);
+      if ("access_token" in res) {
+        authLogin(res.access_token, res.user);
+        navigate("/dashboard");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="auth-shell">
+      <div className="auth-card">
+        <div className="auth-brand">⬡ NucleiAI</div>
+        <h2 className="auth-title">Create account</h2>
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          <label className="field-label">Username</label>
+          <input
+            className="field-input"
+            type="text"
+            required
+            minLength={3}
+            maxLength={50}
+            value={username}
+            onChange={e => setUsername(e.target.value)}
+            autoComplete="username"
+          />
+          <label className="field-label">Email</label>
+          <input
+            className="field-input"
+            type="email"
+            required
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            autoComplete="email"
+          />
+          <label className="field-label">Password <span className="field-hint">(uppercase, lowercase, number, special character)</span></label>
+          <input
+            className="field-input"
+            type="password"
+            required
+            minLength={8}
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            autoComplete="new-password"
+          />
+          {error && <div className="error">{error}</div>}
+          <button className="btn btn-full" type="submit" disabled={busy}>
+            {busy ? "Creating account…" : "Create account"}
+          </button>
+        </form>
+
+        <p className="auth-footer">
+          Already have an account? <Link to="/login" className="link-btn">Sign in</Link>
+        </p>
+      </div>
+    </div>
+  );
+}

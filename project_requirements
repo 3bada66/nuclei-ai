@@ -1,0 +1,654 @@
+Technical explanation depth and jargon (40%) - I need to see every element that was:
+    Database
+    FastAPI backend
+    Frontend
+    Validation
+    Entities and their relations
+
+The point scale for coding part (also, you need to explain them during your presentation):
+
+Playwright testing (you get the full points), 90+% coverage with unit tests (+5), and automating the tests with each deployment (+10)
+Social login: one social login (you get the full points), 2 (+5), 3 (+10), 4+ (+15)
+Basic Authentication + 2FA: at least one method (you get full points), 2 (+5), 3 (+10), 4+ (+15)
+Authorization: if you add multiple user types in your application and prove that they have different permissions, and add an admin dashboard that can change that dynamically (+10)
+Using alternatives to Vercel or Railway and still managing the security (you need to explain and justify this) (+10)
+Securing the servers (no bonus points there, you need to show screenshots from your dashboard to prove, I will also attack)
+Using the old project as the base (you get the full points), new project (+10)
+
+> Source: https://github.com/yigit353/week12-web-programming
+> Generated: 2026-05-06
+
+---
+
+## Repository Structure
+
+```
+week12-web-programming/
+├── .gitignore
+├── README.md
+├── GUIDE.md                                — Session 1 companion guide (gotchas, verification commands)
+├── SECURITY.md                             — Public vulnerability disclosure policy
+├── prompts/
+│   ├── session1-prompt.md                  — Frontend/edge security curriculum
+│   └── session2-prompt.md                  — Backend/origin security curriculum
+│
+├── bytebooks-api/                          — FastAPI backend
+│   ├── .env.example
+│   ├── Procfile
+│   ├── STARTUP.md
+│   ├── auth_utils.py
+│   ├── config.py
+│   ├── database.py
+│   ├── dependencies.py
+│   ├── external_api.py
+│   ├── main.py
+│   ├── models.py
+│   ├── requirements.txt
+│   ├── schemas.py
+│   ├── services.py
+│   ├── test_genre.py                       — pytest unit tests (3 tests)
+│   └── test_scenarios.md                   — 16 manual edge-case scenarios
+│
+└── bytebooks-frontend/                     — Vite + React 19 frontend
+    ├── .env.development                    — VITE_API_URL=http://localhost:8000
+    ├── .env.production.example
+    ├── eslint.config.js
+    ├── index.html
+    ├── middleware.js                       — Vercel Edge middleware
+    ├── package.json
+    ├── vercel.json                         — SPA rewrite + 6 security headers
+    ├── vite.config.js
+    ├── src/
+    │   ├── App.jsx                         — Route table
+    │   ├── main.jsx                        — React root entry point
+    │   ├── components/
+    │   │   ├── AddBookForm.jsx / .css
+    │   │   ├── BookCard.jsx / .css
+    │   │   ├── BookDetail.jsx / .css
+    │   │   ├── BookList.jsx / .css
+    │   │   ├── DashboardLayout.jsx
+    │   │   ├── EditBookForm.jsx / .css
+    │   │   └── ProtectedRoute.jsx
+    │   ├── contexts/
+    │   │   └── AuthContext.jsx
+    │   ├── pages/
+    │   │   ├── AddBookPage.jsx
+    │   │   ├── AuthorsPage.jsx
+    │   │   ├── BooksPage.jsx
+    │   │   ├── Dashboard.jsx
+    │   │   ├── LoginPage.jsx
+    │   │   └── RegisterPage.jsx
+    │   ├── styles/dashboard.css
+    │   └── utils/api.js
+    ├── v1/tests/                           — 4 Playwright specs
+    └── v2/
+        ├── global-setup.ts                 — calls /reset-db before each run
+        ├── playwright.config.ts
+        └── tests/                          — 9 Playwright specs
+```
+
+**No `.github/workflows/` directory — zero GitHub Actions CI/CD pipelines.**
+
+---
+
+## Backend — File by File
+
+### `main.py`
+
+**Routes:**
+
+| Method | Path | Auth | Rate Limit |
+|--------|------|------|-----------|
+| GET | `/books` | No | — |
+| POST | `/books` | Yes | — |
+| GET | `/books/{id}` | No | — |
+| PUT | `/books/{id}` | Yes | — |
+| DELETE | `/books/{id}` | Yes | — |
+| GET | `/books/search-external` | No | 30/min |
+| POST | `/books/import-external` | Yes | — |
+| GET | `/authors` | No | — |
+| POST | `/authors` | Yes | — |
+| GET | `/authors/{id}` | No | — |
+| DELETE | `/authors/{id}` | Yes | — |
+| POST | `/auth/register` | No | — |
+| POST | `/auth/login` | No | 5/min |
+| GET | `/auth/me` | Yes | — |
+| POST | `/reset-db` | **No auth — critical flaw** | — |
+
+**Key patterns:**
+- `@asynccontextmanager` lifespan creates tables + seeds (idempotent: checks `db.exec(select(Author)).first()` first)
+- CORS: explicit list — `localhost:5173`, `localhost:5174`, `FRONTEND_URL` from env. `allow_credentials=True`, no wildcards
+- `slowapi` `Limiter` with `jwt_or_ip_key`: reads `jose.jwt.get_unverified_claims()` on Auth header if present → `user:<sub>`, otherwise `ip:<client.host>`
+- **Decorator order is critical:** `@app.post(...)` outer, `@limiter.limit(...)` inner — reversal silently disables the limit
+- 429 handler returns `Retry-After: 60` header
+
+---
+
+### `models.py`
+
+**`Author` (table=True):**
+- `id: Optional[int]` — PK auto-increment
+- `name: str` — Field(index=True, max_length=100)
+- `bio: Optional[str]` — Field(max_length=500)
+- `created_at: datetime` — default_factory=datetime.utcnow
+- `books: List["Book"]` — Relationship(back_populates="author")
+
+**`Book` (table=True):**
+- `id: Optional[int]` — PK
+- `title: str` — Field(index=True, max_length=200)
+- `price: float` — Field(ge=0)
+- `isbn: str` — Field(unique=True, max_length=13)
+- `stock: int` — Field(default=0, ge=0)
+- `genre: str` — Field(max_length=50)
+- `author_id: int` — Field(foreign_key="author.id")
+- `created_at: datetime`
+- `author: Author` — Relationship(back_populates="books")
+
+**`User` (table=True):**
+- `id: Optional[int]` — PK
+- `username: str` — Field(unique=True, index=True, max_length=50)
+- `email: str` — Field(unique=True, index=True, max_length=100)
+- `hashed_password: str` — Field(max_length=255)
+- `created_at: datetime`
+
+**No cascade deletes — integrity enforced in Python (AuthorService checks before delete).**
+
+---
+
+### `schemas.py`
+
+- `AuthorCreate`: name (min 1, max 100), bio (optional, max 1000)
+- `AuthorResponse`: id, name, bio, created_at — `ConfigDict(from_attributes=True)`
+- `BookCreate`: title, author_id, isbn (optional, regex `^(\d{10}|\d{13})$`), price (gt=0), stock (ge=0), genre
+- `BookUpdate`: all fields Optional — `model_dump(exclude_unset=True)` enables partial PUT
+- `BookResponse`: all fields + nested `author: AuthorResponse`
+- `ExternalBookResult`: title, author, year, isbn (all optional except title)
+- `ImportBookRequest`: isbn (regex validated), author_name (optional)
+- `UserCreate`: username (3–50 chars), email (EmailStr), password (min 8 chars)
+- `UserLogin`: email (EmailStr), password
+- `Token`: access_token, token_type="bearer"
+- `UserResponse`: id, username, email, created_at — **hashed_password excluded**
+
+---
+
+### `auth_utils.py`
+
+```python
+def hash_password(password: str) -> str          # passlib bcrypt, embedded salt
+def verify_password(plain: str, hashed: str) -> bool  # constant-time comparison
+def create_access_token(data: dict) -> str        # adds exp claim, HS256 signs
+def decode_access_token(token: str) -> dict       # raises JWTError on failure
+```
+
+Dependencies: `passlib[bcrypt]`, `python-jose[cryptography]`
+
+---
+
+### `config.py`
+
+```python
+SECRET_KEY = os.getenv("SECRET_KEY", "<hardcoded-dev-fallback>")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+```
+
+**Risk: hardcoded fallback means a missing `SECRET_KEY` env var in production allows anyone who reads this public repo to forge tokens.**
+
+---
+
+### `database.py`
+
+```python
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///bytebooks.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+```
+
+- SQLite: `connect_args={"check_same_thread": False}`, `echo=True`
+- PostgreSQL: no connect args, `echo=False`
+- `get_session()`: FastAPI `Depends` generator
+
+---
+
+### `dependencies.py`
+
+```python
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+    session: Session = Depends(get_session),
+) -> User:
+```
+
+Flow:
+1. `auto_error=False` — returns `None` instead of auto-403 if no header
+2. None credentials → 401
+3. `decode_access_token(token)` → `JWTError` on bad/expired token → 401
+4. Extract `sub` → `int(user_id)`
+5. `session.get(User, user_id)` — handles deleted-user case → 401
+6. All failures: identical 401 `"Could not validate credentials"` + `WWW-Authenticate: Bearer`
+
+---
+
+### `services.py`
+
+**`BookService` (static methods):**
+- `create_book`: verify author exists (404), check duplicate ISBN (409)
+- `update_book`: check exists (404), validate price/stock (422), check ISBN uniqueness excluding self (409), apply `model_dump(exclude_unset=True)`
+- `delete_book`, `get_book`: 404 if not found
+- `list_books`: `db.exec(select(Book)).all()`
+
+**`AuthorService` (static methods):**
+- `create_author`: creates and commits
+- `delete_author`: 404 if not found, 409 if author has books
+- `list_authors`, `get_author`
+
+**`UserService` (static methods):**
+- `create_user`: check email (400), check username (400), hash password, create
+- `authenticate`: fetch by email, `verify_password` — identical 401 for unknown email OR wrong password (no email enumeration)
+- `get_by_id`: `db.get(User, user_id)`
+
+---
+
+### `external_api.py`
+
+`OpenLibraryService` (async static methods):
+- `search_books(query)`: GET openlibrary.org/search.json, timeout=5s
+- `get_book_by_isbn(isbn)`: GET openlibrary.org/api/books
+
+Error translation:
+- `httpx.TimeoutException` → 504
+- `httpx.NetworkError` → 503
+- Non-200 from OL → 502
+- ISBN key missing → 404
+
+---
+
+### `requirements.txt`
+
+```
+fastapi
+uvicorn[standard]
+sqlmodel
+python-multipart
+httpx>=0.24.0
+passlib[bcrypt]
+bcrypt<4.0          ← pin: passlib 1.7.4 incompatible with bcrypt 4.x
+python-jose[cryptography]
+pydantic[email]
+psycopg2-binary
+slowapi>=0.1.9
+```
+
+**No version pins for fastapi, sqlmodel, uvicorn — Railway builds may pick up breaking changes.**
+
+---
+
+### `Procfile`
+
+```
+web: uvicorn main:app --host 0.0.0.0 --port $PORT
+```
+
+Single worker — no gunicorn, no `--workers`. Fine for course project; inadequate for production traffic.
+
+---
+
+## Frontend — File by File
+
+### `src/App.jsx` — Route Table
+
+```
+/login          → <LoginPage />              (outside DashboardLayout)
+/register       → <RegisterPage />           (outside DashboardLayout)
+<DashboardLayout>
+  /             → <Dashboard />
+  /books        → <BooksPage />
+  /authors      → <AuthorsPage />
+  /books/new    → <ProtectedRoute><AddBookPage /></ProtectedRoute>
+</DashboardLayout>
+```
+
+---
+
+### `src/contexts/AuthContext.jsx`
+
+State: `user`, `token`, `loading`, `error`
+
+- `login(email, password)`: POST `/auth/login` → store token in localStorage → GET `/auth/me` → populate `user`
+- `register(username, email, password)`: POST `/auth/register` → auto-calls `login()` (no double entry)
+- `logout()`: clear state + remove from localStorage
+- **On mount**: reads localStorage token → GET `/auth/me` to validate (handles stale tokens on restart)
+- `loading=true` during mount check — prevents ProtectedRoute flash-to-login on refresh
+
+**Documented risk:** localStorage is XSS-accessible. Comments explicitly recommend httpOnly cookies for production.
+
+---
+
+### `src/utils/api.js` — `authFetch`
+
+- Reads token from localStorage
+- Adds `Authorization: Bearer <token>` header
+- Prepends `VITE_API_URL` to path
+- On 401 with existing token: removes token + `window.location.href = '/login'` (hard redirect)
+
+---
+
+### `src/components/ProtectedRoute.jsx`
+
+1. If `loading` → spinner
+2. If `!user` → `<Navigate to="/login" replace state={{ from: location }} />`
+3. Otherwise → `children`
+
+`replace` prevents back-button looping. `from` preserved for potential post-login redirect (not wired in LoginPage).
+
+---
+
+### `src/components/DashboardLayout.jsx`
+
+- Fixed sidebar with `NavLink` (auto `active` class via callback)
+- "Add Book" link only rendered when `user` is truthy
+- Header: `Welcome, {user.username}` + initials avatar + Logout when auth; Login/Register otherwise
+- `<Outlet />` for nested route content
+
+---
+
+### `src/components/BookList.jsx`
+
+State: `books`, `loading`, `error`, `searchTerm`, `selectedGenre`, `selectedBook`, `mode`, `editingBook`
+
+- Client-side filtering: title search (case-insensitive `.includes()`) + genre dropdown
+- Genre dropdown from `[...new Set(books.map(b => b.genre))]`
+- Edit/delete buttons passed as `undefined` to BookCard for unauthenticated users (cards hide buttons)
+- `e.stopPropagation()` on edit/delete to prevent modal trigger
+- `{selectedBook && <BookDetail />}` — unmounts on close
+
+---
+
+### `src/components/BookCard.jsx`
+
+- `author?.name ?? "Unknown Author"` — optional chaining + nullish coalescing
+- `price.toFixed(2)` formatting
+- Genre badge only if truthy
+- Edit/delete buttons only if handlers provided
+
+---
+
+### `src/components/BookDetail.jsx`
+
+Modal overlay. Backdrop click closes; `e.stopPropagation()` on inner card. Shows price, genre, ISBN, stock ("Out of stock" for 0). Pure display — no state, no fetches.
+
+---
+
+### `src/components/AddBookForm.jsx`
+
+1. `useEffect` on mount fetches `/authors`, pre-selects first as default
+2. `handleChange` uses `e.target.name` as computed key — single handler for all fields
+3. Client-side validation before POST
+4. POST via `authFetch`, type-casts `price` and `stock` to numbers
+5. Reset form + call `onBookAdded` on success
+
+---
+
+### `src/components/EditBookForm.jsx`
+
+- Excludes `author_id` from PUT payload (not in `BookUpdate` schema)
+- Only sends changed fields via `model_dump(exclude_unset=True)` equivalent
+- Pre-populates from `book` prop
+
+---
+
+### `src/pages/Dashboard.jsx`
+
+- `Promise.all([fetch /books, fetch /authors])` concurrently
+- Computes: total books, total authors, inventory value (`sum price * stock`), low-stock items (stock < 10)
+- Renders stat cards + books data table
+- Delete via `authFetch` + 204 check
+
+---
+
+### `src/pages/LoginPage.jsx`
+
+- Redirects authenticated users: `<Navigate to="/" replace />`
+- Calls `AuthContext.login()`
+- `role="alert"` div for errors (accessibility)
+- Generic error — doesn't differentiate unknown email from wrong password (consistent with backend)
+
+---
+
+### `middleware.js` — Vercel Edge Middleware
+
+```js
+export const config = {
+  matcher: '/((?!assets/|favicon\\.ico|vite\\.svg).*)',
+};
+
+export default function middleware(request) {
+  const requestId = crypto.randomUUID();
+  const url = new URL(request.url);
+
+  // Admin gate — no real /admin route yet; defensive pre-provision
+  if (url.pathname.startsWith('/admin')) {
+    const session = readCookie(request.headers.get('cookie'), 'bb_session');
+    if (!session) return new Response('unauthorized', { status: 401 });
+  }
+
+  return next({ headers: { 'x-request-id': requestId } });
+}
+```
+
+Custom `readCookie()` parses `Cookie` header manually. Matcher excludes static assets.
+
+---
+
+## Security Implementation
+
+### HTTP Security Headers (`vercel.json`)
+
+```json
+{
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }],
+  "headers": [{
+    "source": "/(.*)",
+    "headers": [
+      { "key": "Content-Security-Policy",
+        "value": "default-src 'self'; script-src 'self'; connect-src 'self' https://week12-web-programming-production.up.railway.app; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" },
+      { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains; preload" },
+      { "key": "X-Frame-Options", "value": "DENY" },
+      { "key": "X-Content-Type-Options", "value": "nosniff" },
+      { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+      { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=(), interest-cohort=()" }
+    ]
+  }]
+}
+```
+
+| Header | Purpose |
+|--------|---------|
+| CSP | XSS allowlist — enforcing, not Report-Only |
+| HSTS | Force HTTPS for 2 years + preload |
+| X-Frame-Options: DENY | Clickjacking defense |
+| X-Content-Type-Options: nosniff | MIME sniffing defense |
+| Referrer-Policy | Prevents full URL leakage cross-origin |
+| Permissions-Policy | Disables camera, mic, geolocation, FLoC |
+
+**Known weakness:** `style-src 'unsafe-inline'` — documented open item (required by inline component styles).
+
+---
+
+### Backend Rate Limiting (slowapi)
+
+- `POST /auth/login`: 5/min per `user:<jwt-sub>` or `ip:<client-ip>`
+- `GET /books/search-external`: 30/min
+- 429 response includes `Retry-After: 60`
+
+### Vercel WAF
+
+- Path: `^/(api|auth)/.*$`
+- Algorithm: Fixed Window, 60s window, 60 requests
+- Counting key: IP Address
+- Action: 429
+
+---
+
+## Authentication Implementation
+
+### Full JWT Flow
+
+**Registration:**
+1. Client: `{ username, email, password }` → POST `/auth/register`
+2. `UserService.create_user`: check email unique (400), check username unique (400), bcrypt hash, store
+3. Returns `UserResponse` (no password)
+4. Frontend auto-calls `login()` immediately
+
+**Login (rate-limited 5/min):**
+1. Client: `{ email, password }` → POST `/auth/login`
+2. `UserService.authenticate`: lookup by email, `verify_password()`. Identical 401 for both "unknown email" and "wrong password"
+3. `create_access_token({"sub": str(user.id)})` — HS256, 60-minute TTL
+4. Returns `Token(access_token, token_type="bearer")`
+5. Client: store in localStorage, GET `/auth/me`
+
+**Protected Route Access:**
+1. `authFetch` adds `Authorization: Bearer <token>` header
+2. `get_current_user` dependency: `HTTPBearer(auto_error=False)` → `decode_access_token` → extract `sub` → DB lookup → return `User`
+3. All failure paths: identical 401 + `WWW-Authenticate: Bearer`
+
+**Token lifecycle:**
+- TTL: 60 minutes
+- Algorithm: HS256 (symmetric)
+- No refresh token — hard logout after 60 min
+- Rotation: change `SECRET_KEY` env var on Railway
+
+---
+
+## Database / Models Summary
+
+| Table | Key Constraints |
+|-------|----------------|
+| `author` | `name` indexed |
+| `book` | `isbn` UNIQUE, `price` ge=0, `stock` ge=0, FK → author.id |
+| `user` | `username` UNIQUE+indexed, `email` UNIQUE+indexed |
+
+Relationship: `Author.books ↔ Book.author` — bidirectional one-to-many, no cascade delete.
+
+**Issue:** `Book.isbn` UNIQUE + empty string fallback means only one book can have no ISBN. Should be nullable.
+
+**Issue:** `datetime.utcnow` deprecated in Python 3.12+. Should use `datetime.now(timezone.utc)`.
+
+---
+
+## Deployment Config
+
+### Backend (Railway)
+
+**Required env vars:**
+- `DATABASE_URL` — auto-injected by Railway Postgres add-on
+- `SECRET_KEY` — `openssl rand -hex 32`
+- `FRONTEND_URL` — bare Vercel origin, no trailing slash
+
+**Production URL:** `https://week12-web-programming-production.up.railway.app`
+
+Auto-deploys on `git push origin main`.
+
+### Frontend (Vercel)
+
+**Required env vars:**
+- `VITE_API_URL` — bare Railway origin, no trailing slash
+
+**Root Directory setting:** `bytebooks-frontend`
+
+Requires manual `vercel deploy --prod` — GitHub integration not connected.
+
+---
+
+## Test Coverage
+
+### What Is Tested
+
+**Backend (pytest, 3 tests):**
+- Genre field created, defaulted, and updated correctly
+
+**Frontend v1 Playwright (4 specs):**
+- Sidebar navigation, book list display, search/filter, card modal
+
+**Frontend v2 Playwright (9 specs, auth-aware):**
+- All v1 tests + edit book, delete with dialog, form interactions, visual regression, author page
+- `global-setup.ts` calls `POST /reset-db` before each run
+- Visual regression: Chromium + Firefox + WebKit, threshold 20%, max 100 differing pixels
+
+### What Is NOT Tested
+
+- Auth flows (register, login, logout, protected route redirect)
+- JWT expiration
+- Rate limiting (429 responses)
+- Author CRUD via UI
+- External API (Open Library search/import)
+- Error states (404/409/422 UI display)
+- CORS preflight
+- Security headers presence
+- `/admin` gate
+- Database connection failure
+- Concurrent/race conditions (duplicate ISBN race)
+
+---
+
+## Gaps and Missing Features
+
+### Critical
+
+1. **`POST /reset-db` has no authentication** — any actor reaching the API can wipe all data
+2. **Hardcoded `SECRET_KEY` fallback** — predictable key if env var missing; public repo means anyone can forge tokens
+3. **No CI/CD** — zero GitHub Actions; tests must be run manually
+
+### Functional
+
+4. No refresh token — hard logout after 60 min
+5. No `/admin` React route — edge middleware gate is defensive only
+6. No role-based access control (RBAC) — all authenticated users identical
+7. No email verification
+8. No password reset
+9. No pagination — all records returned in single query
+10. No local book search endpoint — only client-side filter + external Open Library
+11. AuthorsPage read-only — no create/edit UI (API endpoint exists)
+12. No user profile page
+
+### Missing for Bonus Points (per project requirements)
+
+13. **No social login** — zero OAuth implementation (Google, GitHub, etc.)
+14. **No 2FA / MFA** — TOTP, SMS, email 2FA absent
+15. **No admin dashboard** — no role management UI
+16. **No alternative deployment** — uses Vercel + Railway (no Fly.io, Docker VPS, etc.)
+17. **No CI test automation** — Playwright tests not wired to deploy pipeline
+
+---
+
+## Code Quality Assessment
+
+### Patterns Worth Copying Directly
+
+1. **Service layer** — `services.py` thin routes + business logic in services; independently testable
+2. **Uniform auth error** — identical 401 for all failure cases closes email enumeration
+3. **`model_dump(exclude_unset=True)`** — true partial update with all-Optional `BookUpdate`
+4. **`HTTPBearer(auto_error=False)`** — controls exact 401 response; prevents FastAPI's default 403
+5. **`jwt_or_ip_key` rate limiting** — per-user when authenticated, per-IP when anonymous
+6. **`AuthProvider` on-mount token validation** — `/auth/me` on startup prevents stale token confusion
+7. **ProtectedRoute loading spinner** — prevents flash-to-login on page refresh
+8. **Idempotent seeding** — checks for existing data before inserting
+9. **`dependency_overrides` in test fixtures** — correct pattern for injecting test DB session
+10. **`BookResponse` with nested `AuthorResponse`** — denormalized read in single API call
+11. **CORS no-wildcard + explicit origin list**
+12. **`bcrypt<4.0` pin** — documents and handles passlib/bcrypt incompatibility
+13. **Vercel 6-header security config** — copy `vercel.json` headers block directly
+
+### Patterns to Improve
+
+1. **`POST /reset-db` unprotected** — gate behind env check or remove from production
+2. **`datetime.utcnow`** — replace with `datetime.now(timezone.utc)`
+3. **Empty string ISBN fallback** — use nullable column (`Optional[str]`) instead of `""`
+4. **Unpinned `requirements.txt`** — pin all packages via `pip freeze` or use Poetry
+5. **`localStorage` token storage** — move to httpOnly cookies + CSRF token
+6. **No pagination** — add `offset`/`limit` query params
+7. **Single Uvicorn worker** — document `--workers` for production scale
+8. **`window.location.href` on 401** — replace with `useNavigate` for soft redirect
+9. **No TypeScript in source** — test files use TS but production code is plain JS
+10. **v1 Playwright tests stale** — assume state-based routing that no longer exists
+
