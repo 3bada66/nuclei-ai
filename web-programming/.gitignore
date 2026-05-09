@@ -4,3 +4,7 @@ __pycache__/
 .env
 outputs/
 frontend/dist/
+*.db
+*.sqlite
+backend/storage/uploads/
+backend/storage/results/
