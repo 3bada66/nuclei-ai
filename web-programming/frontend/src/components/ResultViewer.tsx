@@ -1,12 +1,16 @@
-import { fileUrl, type AnalysisResponse } from "../api";
+import { fileUrl, downloadPdfReport, type AnalysisResponse } from "../api";
 import MetricCard from "./MetricCard";
+import { useToast } from "../contexts/ToastContext";
 
 interface Props {
   result: AnalysisResponse | null;
   busy: boolean;
+  onPublish?: () => void;
+  published?: boolean;
 }
 
-export default function ResultViewer({ result, busy }: Props) {
+export default function ResultViewer({ result, busy, onPublish, published }: Props) {
+  const { toast } = useToast();
   if (!result) {
     return (
       <div className="card">
@@ -57,6 +61,23 @@ export default function ResultViewer({ result, busy }: Props) {
           caption={result.message}
         />
       </div>
+
+      {onPublish && (
+        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+          {published ? (
+            <button className="btn btn-secondary btn-full" disabled>
+              ✓ Published to Explore
+            </button>
+          ) : (
+            <button className="btn btn-full" onClick={onPublish}>
+              🌐 Publish to Explore
+            </button>
+          )}
+          <button className="btn btn-secondary btn-full" onClick={() => downloadPdfReport(result.job_id).catch(e => toast(e.message, "error"))}>
+            ↓ Download PDF Report
+          </button>
+        </div>
+      )}
     </div>
   );
 }

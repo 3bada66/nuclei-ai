@@ -63,3 +63,51 @@ class Annotation(SQLModel, table=True):
 
     job: Optional[AnalysisJob] = Relationship(back_populates="annotations")
     user: Optional[User] = Relationship(back_populates="annotations")
+
+
+class Publication(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    job_id: int = Field(foreign_key="analysisjob.id", unique=True)
+    user_id: int = Field(foreign_key="user.id")
+    headline: str = Field(max_length=150)
+    description: str = Field(max_length=2000)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    job: Optional[AnalysisJob] = Relationship()
+    user: Optional[User] = Relationship()
+    favourites: List["Favourite"] = Relationship(back_populates="publication")
+
+
+class Favourite(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    publication_id: int = Field(foreign_key="publication.id")
+    user_id: int = Field(foreign_key="user.id")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    publication: Optional[Publication] = Relationship(back_populates="favourites")
+
+
+class Comment(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    publication_id: int = Field(foreign_key="publication.id")
+    user_id: int = Field(foreign_key="user.id")
+    text: str = Field(max_length=1000)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class Notification(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id")        # recipient
+    actor_id: int = Field(foreign_key="user.id")       # who triggered it
+    kind: str = Field(max_length=30)                   # "favourite" | "comment"
+    publication_id: int = Field(foreign_key="publication.id")
+    read: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class RevokedToken(SQLModel, table=True):
+    """Stores revoked JWT token hashes until their natural expiry."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    token_hash: str = Field(unique=True, index=True, max_length=64)
+    expires_at: datetime
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

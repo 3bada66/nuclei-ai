@@ -521,7 +521,7 @@ button {
 /* ── Job table ─────────────────────────────────────────────────────────────────── */
 
 .table-wrap {
-  overflow-x: auto;
+  overflow: hidden;
   border-radius: var(--radius-card);
   border: 1px solid var(--border-hairline);
 }
@@ -758,12 +758,18 @@ button {
   font-size: 15px;
   padding: 10px 12px;
   transition: border-color var(--motion-fast);
+  color-scheme: dark;
 }
 
 .field-input:focus {
   outline: none;
   border-color: var(--accent-violet);
   box-shadow: var(--focus-ring);
+}
+
+.field-input option {
+  background-color: #1a1a2e;
+  color: #e2e8f0;
 }
 
 .field-otp {
@@ -871,6 +877,7 @@ button {
 .user-pill-info {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 3px;
   min-width: 0;
 }

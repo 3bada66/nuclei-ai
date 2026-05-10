@@ -3,22 +3,31 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { getMe } from "../api";
 import { useAuth } from "../contexts/AuthContext";
 
+const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://127.0.0.1:8000";
+
 export default function OAuthCallbackPage() {
   const { login: authLogin } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
 
   useEffect(() => {
-    const token = params.get("token");
-    if (!token) {
+    const code = params.get("code");
+    if (!code) {
       navigate("/login?error=oauth_failed");
       return;
     }
-    localStorage.setItem("token", token);
-    getMe()
-      .then(user => {
-        authLogin(token, user);
-        navigate("/dashboard");
+    fetch(`${API_BASE}/auth/oauth/exchange`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code }),
+    })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(({ access_token }: { access_token: string }) => {
+        localStorage.setItem("token", access_token);
+        return getMe().then(user => {
+          authLogin(access_token, user);
+          navigate("/dashboard");
+        });
       })
       .catch(() => {
         localStorage.removeItem("token");

@@ -142,6 +142,7 @@ class JobSummary(BaseModel):
     original_filename: str
     created_at: datetime
     annotation_count: int = 0
+    publication_id: Optional[int] = None
 
 
 class JobResponse(BaseModel):
@@ -164,6 +165,57 @@ class JobResponse(BaseModel):
     device: str
     created_at: datetime
     annotations: List[AnnotationResponse] = []
+
+
+# ── Publication & Explore ─────────────────────────────────────────────────────
+
+class PublishRequest(BaseModel):
+    headline: str = Field(min_length=3, max_length=150)
+    description: str = Field(min_length=10, max_length=2000)
+
+
+class PublicationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    job_id: int
+    job_uid: str
+    user_id: int
+    username: str
+    headline: str
+    description: str
+    cell_count: int
+    mode: str
+    overlay_url: str
+    mask_url: str
+    input_url: str
+    original_filename: str
+    created_at: datetime
+    is_favourited: bool = False
+    comment_count: int = 0
+
+
+class CommentCreate(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class CommentResponse(BaseModel):
+    id: int
+    publication_id: int
+    user_id: int
+    username: str
+    text: str
+    created_at: datetime
+
+
+class NotificationResponse(BaseModel):
+    id: int
+    actor_username: str
+    kind: str
+    publication_id: int
+    publication_headline: str
+    read: bool
+    created_at: datetime
 
 
 # ── User ──────────────────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@ import {
   createAnnotation,
   deleteAnnotation,
   fileUrl,
+  formatDate,
+  downloadPdfReport,
   type JobDetail,
   type AnnotationResponse,
 } from "../api";
@@ -71,9 +73,13 @@ export default function JobDetailPage() {
           <h2 className="page-title" style={{ marginTop: 8 }}>Job <code className="job-id">{job.job_id}</code></h2>
           <p className="page-subtitle">{job.original_filename}</p>
         </div>
-        <span className={`badge ${job.mode === "model" ? "badge-model" : "badge-fallback"}`}>
-          {job.mode} · {job.device}
-        </span>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span className={`badge ${job.mode === "model" ? "badge-model" : "badge-fallback"}`}>
+            {job.mode} · {job.device}
+          </span>
+          <button className="btn btn-secondary" onClick={() => downloadPdfReport(job.job_id).catch(e => toast(e.message, "error"))}
+            title="Download PDF report">↓ PDF</button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -122,7 +128,7 @@ export default function JobDetailPage() {
           <div key={ann.id} className="annotation-row">
             <p className="annotation-text">{ann.note}</p>
             <div className="annotation-meta">
-              <span>{new Date(ann.created_at).toLocaleString()}</span>
+              <span>{formatDate(ann.created_at)}</span>
               <button
                 className="btn-ghost btn-danger"
                 onClick={() => handleDeleteAnnotation(ann)}

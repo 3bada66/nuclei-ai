@@ -3,19 +3,28 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
+ENV: str = os.getenv("ENV", "development")
 DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./nuclei.db")
 
 _raw_secret = os.getenv("SECRET_KEY", "")
-if not _raw_secret:
-    if os.getenv("ENV", "development") == "production":
-        raise ValueError("SECRET_KEY env var is required in production")
+_INSECURE_DEFAULTS = {"dev-secret-change-in-production", "", "change-me", "secret"}
+
+if not _raw_secret or _raw_secret in _INSECURE_DEFAULTS:
+    if ENV == "production":
+        print("FATAL: SECRET_KEY is missing or uses an insecure default. Set a strong random value.", file=sys.stderr)
+        sys.exit(1)
     _raw_secret = "dev-secret-change-in-production"
+
+if len(_raw_secret) < 32 and ENV != "development":
+    print("FATAL: SECRET_KEY must be at least 32 characters.", file=sys.stderr)
+    sys.exit(1)
 
 SECRET_KEY: str = _raw_secret
 ALGORITHM: str = "HS256"
@@ -23,7 +32,6 @@ ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 
 TEMP_TOKEN_EXPIRE_MINUTES: int = 5
 
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
-ENV: str = os.getenv("ENV", "development")
 
 # OAuth providers (empty string = provider disabled)
 GOOGLE_CLIENT_ID: str = os.getenv("GOOGLE_CLIENT_ID", "")

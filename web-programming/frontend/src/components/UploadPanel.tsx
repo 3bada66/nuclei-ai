@@ -6,23 +6,24 @@ interface Props {
   busy: boolean;
   error: string | null;
   onFileSelected: (file: File) => void;
+  onFilesSelected?: (files: File[]) => void;
   onAnalyze: () => void;
 }
 
 export default function UploadPanel({
-  file,
-  previewUrl,
-  busy,
-  error,
-  onFileSelected,
-  onAnalyze,
+  file, previewUrl, busy, error, onFileSelected, onFilesSelected, onAnalyze,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
 
   function handleChange(e: ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) onFileSelected(f);
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    if (files.length > 1 && onFilesSelected) {
+      onFilesSelected(Array.from(files));
+    } else {
+      onFileSelected(files[0]);
+    }
   }
 
   function handleDrop(e: DragEvent<HTMLDivElement>) {
@@ -59,6 +60,7 @@ export default function UploadPanel({
           ref={inputRef}
           type="file"
           accept="image/*"
+          multiple
           style={{ display: "none" }}
           onChange={handleChange}
         />
@@ -72,7 +74,7 @@ export default function UploadPanel({
 
       <button
         type="button"
-        className="btn"
+        className="btn btn-full"
         disabled={!file || busy}
         onClick={onAnalyze}
       >

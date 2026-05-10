@@ -1,5 +1,5 @@
 import { createContext, ReactNode, useContext, useEffect, useState } from "react";
-import { getMe, type UserResponse } from "../api";
+import { getMe, logoutApi, type UserResponse } from "../api";
 
 interface AuthState {
   user: UserResponse | null;
@@ -37,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    logoutApi().catch(() => {});
     localStorage.removeItem("token");
     setToken(null);
     setUser(null);

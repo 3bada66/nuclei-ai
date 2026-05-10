@@ -110,12 +110,43 @@ def hash_otp(code: str) -> str:
 
 
 def verify_otp_hash(code: str, stored_hash: str) -> bool:
-    return hashlib.sha256(code.encode()).hexdigest() == stored_hash
+    import hmac as _hmac
+    computed = hashlib.sha256(code.encode()).hexdigest()
+    return _hmac.compare_digest(computed, stored_hash)
 
 
 def generate_reset_token() -> str:
     """Returns a URL-safe 32-byte random token (not stored — only its hash is)."""
     return secrets.token_urlsafe(32)
+
+
+# ── Token revocation blacklist ─────────────────────────────────────────────────
+
+import threading as _threading
+
+_revoked_tokens: dict[str, "datetime"] = {}
+_revoked_lock = _threading.Lock()
+
+
+def revoke_token(token: str) -> None:
+    """Add a JWT to the blacklist until its natural expiry."""
+    try:
+        from jose import jwt as _jwt
+        payload = _jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+    except Exception:
+        return
+    with _revoked_lock:
+        _revoked_tokens[token] = exp
+        now = datetime.now(timezone.utc)
+        expired = [t for t, e in _revoked_tokens.items() if e < now]
+        for t in expired:
+            del _revoked_tokens[t]
+
+
+def is_token_revoked(token: str) -> bool:
+    with _revoked_lock:
+        return token in _revoked_tokens
 
 
 def send_reset_code_email(to_email: str, code: str) -> None:

@@ -1,5 +1,16 @@
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? "http://127.0.0.1:8000";
 
+/** Parse a UTC datetime string from the backend and format it in the user's local timezone. */
+export function formatDate(isoStr: string): string {
+  const utc = isoStr.endsWith("Z") || isoStr.includes("+") ? isoStr : isoStr + "Z";
+  return new Date(utc).toLocaleString();
+}
+
+export function formatDateOnly(isoStr: string): string {
+  const utc = isoStr.endsWith("Z") || isoStr.includes("+") ? isoStr : isoStr + "Z";
+  return new Date(utc).toLocaleDateString();
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface AnalysisMetadata {
@@ -51,6 +62,45 @@ export interface JobSummary {
   original_filename: string;
   created_at: string;
   annotation_count: number;
+  publication_id: number | null;
+}
+
+export interface PublicationResponse {
+  id: number;
+  job_id: number;
+  job_uid: string;
+  user_id: number;
+  username: string;
+  headline: string;
+  description: string;
+  cell_count: number;
+  mode: string;
+  overlay_url: string;
+  mask_url: string;
+  input_url: string;
+  original_filename: string;
+  created_at: string;
+  is_favourited: boolean;
+  comment_count: number;
+}
+
+export interface CommentResponse {
+  id: number;
+  publication_id: number;
+  user_id: number;
+  username: string;
+  text: string;
+  created_at: string;
+}
+
+export interface NotificationResponse {
+  id: number;
+  actor_username: string;
+  kind: string;
+  publication_id: number;
+  publication_headline: string;
+  read: boolean;
+  created_at: string;
 }
 
 export interface AnnotationResponse {
@@ -188,6 +238,10 @@ export function getMe(): Promise<UserResponse> {
   return authed("/auth/me");
 }
 
+export function logoutApi(): Promise<void> {
+  return authed("/auth/logout", { method: "POST" });
+}
+
 export function totpSetup(token: string): Promise<TotpSetupResponse> {
   return authFetch("/auth/2fa/setup", token, { method: "POST" });
 }
@@ -278,6 +332,95 @@ export function createAnnotation(jobId: string, note: string): Promise<Annotatio
 
 export function deleteAnnotation(annotationId: number): Promise<void> {
   return authed(`/api/annotations/${annotationId}`, { method: "DELETE" });
+}
+
+// ── Explore / Publish / Favourites ───────────────────────────────────────────
+
+export function publishJob(jobId: string, headline: string, description: string): Promise<PublicationResponse> {
+  return authed(`/api/jobs/${jobId}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ headline, description }),
+  });
+}
+
+export function unpublishPublication(pubId: number): Promise<void> {
+  return authed(`/api/publications/${pubId}`, { method: "DELETE" });
+}
+
+export function getJobPublication(jobId: string): Promise<PublicationResponse> {
+  return authed(`/api/jobs/${jobId}/publication`);
+}
+
+export function getExplore(): Promise<PublicationResponse[]> {
+  return authed("/api/explore");
+}
+
+export function addFavourite(pubId: number): Promise<void> {
+  return authed(`/api/publications/${pubId}/favourite`, { method: "POST" });
+}
+
+export function removeFavourite(pubId: number): Promise<void> {
+  return authed(`/api/publications/${pubId}/favourite`, { method: "DELETE" });
+}
+
+export function getFavourites(): Promise<PublicationResponse[]> {
+  return authed("/api/favourites");
+}
+
+// Comments
+export function getComments(pubId: number): Promise<CommentResponse[]> {
+  return authed(`/api/publications/${pubId}/comments`);
+}
+export function addComment(pubId: number, text: string): Promise<CommentResponse> {
+  return authed(`/api/publications/${pubId}/comments`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+export function deleteComment(commentId: number): Promise<void> {
+  return authed(`/api/comments/${commentId}`, { method: "DELETE" });
+}
+
+// Notifications
+export function getNotifications(): Promise<NotificationResponse[]> {
+  return authed("/api/notifications");
+}
+export function getUnreadCount(): Promise<{ count: number }> {
+  return authed("/api/notifications/unread-count");
+}
+export function markAllRead(): Promise<void> {
+  return authed("/api/notifications/read-all", { method: "POST" });
+}
+
+// User profiles
+export function getUserPublications(username: string): Promise<PublicationResponse[]> {
+  return authed(`/api/users/${username}/publications`);
+}
+
+// Re-analyze
+export function reanalyzeJob(jobId: string): Promise<import("./api").AnalysisResponse> {
+  return authed(`/api/jobs/${jobId}/reanalyze`, { method: "POST" });
+}
+
+// PDF report
+export async function downloadPdfReport(jobId: string): Promise<void> {
+  const token = localStorage.getItem("token") ?? "";
+  const tzOffset = -Math.round(new Date().getTimezoneOffset() / 60);
+  const res = await fetch(`${(import.meta.env.VITE_API_URL as string | undefined) ?? "http://127.0.0.1:8000"}/api/jobs/${jobId}/report.pdf?tz_offset=${tzOffset}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    let detail = `Failed to download PDF (${res.status})`;
+    try { const e = await res.json(); if (e?.detail) detail = e.detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `nuclei-report-${jobId}.pdf`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 // ── Admin endpoints ───────────────────────────────────────────────────────────

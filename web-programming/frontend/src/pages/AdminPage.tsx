@@ -5,6 +5,7 @@ import {
   adminListUsers,
   adminStats,
   adminUpdateRole,
+  formatDateOnly,
   type AdminStats,
   type UserResponse,
 } from "../api";
@@ -206,7 +207,7 @@ export default function AdminPage() {
                         <span className={`badge badge-role-${u.role}`}>{u.role}</span>
                       )}
                     </td>
-                    <td className="ts">{new Date(u.created_at).toLocaleDateString()}</td>
+                    <td className="ts">{formatDateOnly(u.created_at)}</td>
                     <td>
                       {canModify(u) ? (
                         <button

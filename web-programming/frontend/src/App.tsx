@@ -5,7 +5,12 @@ import DashboardLayout from "./components/DashboardLayout";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ToastContainer from "./components/ToastContainer";
 import { ToastProvider } from "./contexts/ToastContext";
+import AboutPage from "./pages/AboutPage";
 import AnalyzePage from "./pages/AnalyzePage";
+import ContactPage from "./pages/ContactPage";
+import ExplorePage from "./pages/ExplorePage";
+import FavouritesPage from "./pages/FavouritesPage";
+import UserProfilePage from "./pages/UserProfilePage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 import AdminPage from "./pages/AdminPage";
@@ -40,6 +45,11 @@ export default function App() {
               <Route path="jobs/:jobId" element={<JobDetailPage />} />
               <Route path="2fa/setup" element={<TwoFactorSetupPage />} />
               <Route path="profile" element={<ProfilePage />} />
+              <Route path="explore" element={<ExplorePage />} />
+              <Route path="favourites" element={<FavouritesPage />} />
+              <Route path="users/:username" element={<UserProfilePage />} />
+              <Route path="about" element={<AboutPage />} />
+              <Route path="contact" element={<ContactPage />} />
 
               {/* Admin-only routes */}
               <Route element={<AdminRoute />}>

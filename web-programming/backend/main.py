@@ -5,7 +5,12 @@ Run from the project root (web-programming/):
 """
 
 import csv
+import hashlib
+import html as _html
 import io
+import logging
+import secrets
+import threading
 from contextlib import asynccontextmanager
 
 import httpx
@@ -13,9 +18,16 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Union
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
+_log = logging.getLogger("nuclei")
+
 from fastapi import Body, Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -41,7 +53,7 @@ from backend.security import SecurityHeadersMiddleware, is_valid_image_bytes
 from backend.crud import AnnotationService, JobService
 from backend.database import create_db_and_tables, engine, get_session
 from backend.dependencies import get_current_user, get_temp_token_user_id, require_role
-from backend.models import AnalysisJob, User, UserRole
+from backend.models import AnalysisJob, Annotation, Comment, Favourite, Notification, Publication, RevokedToken, User, UserRole
 from backend.oauth import oauth
 from backend.schemas import (
     AnalysisResponse,
@@ -66,6 +78,11 @@ from backend.schemas import (
     TwoFactorRequiredResponse,
     TwoFactorSetupResponse,
     TwoFactorVerifyRequest,
+    CommentCreate,
+    CommentResponse,
+    NotificationResponse,
+    PublicationResponse,
+    PublishRequest,
     UpdateProfileRequest,
     UserResponse,
 )
@@ -73,6 +90,23 @@ from backend.services import analysis_service
 from backend.totp_utils import generate_totp_secret, get_totp_uri, verify_totp
 
 RESULT_DIR = Path(__file__).resolve().parent / "storage" / "results"
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+
+# Short-lived OAuth code store: code → (token, expires_at)
+_oauth_codes: dict[str, tuple[str, datetime]] = {}
+_oauth_codes_lock = threading.Lock()
+
+
+def _store_oauth_code(token: str) -> str:
+    code = secrets.token_urlsafe(16)
+    expires = datetime.now(timezone.utc) + timedelta(seconds=60)
+    with _oauth_codes_lock:
+        _oauth_codes[code] = (token, expires)
+        now = datetime.now(timezone.utc)
+        for c in [k for k, (_, e) in _oauth_codes.items() if e < now]:
+            del _oauth_codes[c]
+    return code
+
 
 # Role groups used throughout admin logic
 _ELEVATED = (UserRole.manager, UserRole.admin)       # can access admin endpoints
@@ -82,6 +116,7 @@ _MANAGEABLE = (UserRole.viewer, UserRole.researcher)  # roles that can be change
 # ── Rate limiter ──────────────────────────────────────────────────────────────
 
 limiter = Limiter(key_func=get_remote_address)
+_bearer = HTTPBearer(auto_error=False)
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
@@ -95,8 +130,8 @@ async def lifespan(app: FastAPI):
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
-_docs_url = None if ENV == "production" else "/docs"
-_redoc_url = None if ENV == "production" else "/redoc"
+_docs_url = "/docs" if ENV == "development" else None
+_redoc_url = "/redoc" if ENV == "development" else None
 
 app = FastAPI(
     title="Nuclei Analysis API",
@@ -111,6 +146,21 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Security headers — added first so they apply to every response
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+# Reject bodies larger than 25 MB at the framework level before routes run
+from starlette.middleware.base import BaseHTTPMiddleware as _Base
+
+class _BodySizeLimitMiddleware(_Base):
+    _limit = 25 * 1024 * 1024
+
+    async def dispatch(self, request: Request, call_next):
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > self._limit:
+            from starlette.responses import JSONResponse
+            return JSONResponse({"detail": "Request body too large."}, status_code=413)
+        return await call_next(request)
+
+app.add_middleware(_BodySizeLimitMiddleware)
 
 # CORS: only allow localhost origins in development
 _cors_origins = [FRONTEND_URL]
@@ -130,7 +180,12 @@ app.add_middleware(
 
 @app.get("/health", include_in_schema=False)
 @app.get("/api/health", response_model=HealthResponse)
-def health() -> HealthResponse:
+def health(session: Session = Depends(get_session)) -> HealthResponse:
+    try:
+        session.exec(text("SELECT 1"))
+    except Exception as e:
+        _log.error("DB health check failed: %s", e)
+        raise HTTPException(status_code=503, detail="Database unavailable.")
     return HealthResponse(**analysis_service.get_health())
 
 
@@ -156,12 +211,11 @@ async def register(
                 )
             raise HTTPException(status_code=409, detail="An account with this email already exists. Please sign in.")
         raise HTTPException(status_code=409, detail="This username is already taken.")
-    is_first_user = session.exec(select(User)).first() is None
     user = User(
         username=data.username,
         email=data.email,
         hashed_password=hash_password(data.password),
-        role=UserRole.admin if is_first_user else UserRole.viewer,
+        role=UserRole.viewer,
     )
     session.add(user)
     session.commit()
@@ -198,6 +252,33 @@ async def login(
 @app.get("/auth/me", response_model=UserResponse)
 def me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return UserResponse.model_validate(current_user)
+
+
+@app.post("/auth/logout", status_code=204)
+def logout(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    _current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+):
+    if creds:
+        try:
+            payload = decode_token(creds.credentials)
+            exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+            token_hash = hashlib.sha256(creds.credentials.encode()).hexdigest()
+            existing = session.exec(
+                select(RevokedToken).where(RevokedToken.token_hash == token_hash)
+            ).first()
+            if not existing:
+                session.add(RevokedToken(token_hash=token_hash, expires_at=exp))
+                # Clean up expired tokens while we're here
+                now = datetime.now(timezone.utc)
+                for expired in session.exec(
+                    select(RevokedToken).where(RevokedToken.expires_at < now)
+                ).all():
+                    session.delete(expired)
+                session.commit()
+        except Exception:
+            pass
 
 
 @app.patch("/auth/me", response_model=UserResponse)
@@ -379,7 +460,9 @@ def totp_verify_setup(
 
 
 @app.post("/auth/2fa/verify", response_model=TokenResponse)
-def totp_verify(
+@limiter.limit("5/minute")
+async def totp_verify(
+    request: Request,
     data: TwoFactorVerifyRequest,
     user_id: int = Depends(get_temp_token_user_id),
     session: Session = Depends(get_session),
@@ -403,15 +486,14 @@ async def email_otp_send(
     session: Session = Depends(get_session),
 ) -> dict:
     user = session.exec(select(User).where(User.email == data.email)).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="No account found with this email.")
-    code = generate_otp()
-    user.email_otp_hash = hash_otp(code)
-    user.email_otp_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
-    session.add(user)
-    session.commit()
-    send_otp_email(user.email, code)
-    return {"message": "A verification code was sent to your email."}
+    if user:
+        code = generate_otp()
+        user.email_otp_hash = hash_otp(code)
+        user.email_otp_expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        session.add(user)
+        session.commit()
+        send_otp_email(user.email, code)
+    return {"message": "If that email is registered, a verification code was sent."}
 
 
 @app.post("/auth/email-otp/verify", response_model=TokenResponse)
@@ -422,10 +504,8 @@ async def email_otp_verify(
     session: Session = Depends(get_session),
 ) -> TokenResponse:
     user = session.exec(select(User).where(User.email == data.email)).first()
-    if not user:
-        raise HTTPException(status_code=404, detail="No account found with this email.")
     now = datetime.now(timezone.utc)
-    if (
+    if not user or (
         not user.email_otp_hash
         or not user.email_otp_expires_at
         or user.email_otp_expires_at.replace(tzinfo=timezone.utc) < now
@@ -537,7 +617,23 @@ def _oauth_upsert_redirect(session: Session, email: str, display_name: str) -> R
         session.commit()
         session.refresh(user)
     token = create_access_token(user.id)
-    return RedirectResponse(f"{FRONTEND_URL}/oauth-callback?token={token}")
+    code = _store_oauth_code(token)
+    return RedirectResponse(f"{FRONTEND_URL}/oauth-callback?code={code}")
+
+
+# ── OAuth code exchange ───────────────────────────────────────────────────────
+
+@app.post("/auth/oauth/exchange")
+def oauth_exchange(code: str = Body(..., embed=True)) -> dict:
+    """Exchange a short-lived OAuth code for a JWT. The code is single-use."""
+    with _oauth_codes_lock:
+        entry = _oauth_codes.pop(code, None)
+    if not entry:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth code.")
+    token, expires = entry
+    if datetime.now(timezone.utc) > expires:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth code.")
+    return {"access_token": token, "token_type": "bearer"}
 
 
 # ── Analysis ──────────────────────────────────────────────────────────────────
@@ -552,9 +648,11 @@ async def analyze(
 ) -> AnalysisResponse:
     if not (file.content_type or "").startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image.")
-    payload = await file.read()
+    payload = await file.read(MAX_UPLOAD_BYTES + 1)
     if not payload:
         raise HTTPException(status_code=400, detail="Empty upload.")
+    if len(payload) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size is 20 MB.")
     if not is_valid_image_bytes(payload):
         raise HTTPException(status_code=400, detail="File content is not a recognised image format.")
     try:
@@ -596,19 +694,16 @@ def list_jobs(
         jobs = JobService.list_jobs(session, skip=skip, limit=limit)
     else:
         jobs = JobService.list_jobs_by_user(session, current_user.id, skip=skip, limit=limit)
-    return [
-        JobSummary(
-            id=j.id,
-            job_id=j.job_id,
-            status=j.status,
-            cell_count=j.cell_count,
-            mode=j.mode,
-            original_filename=j.original_filename,
-            created_at=j.created_at,
+    result = []
+    for j in jobs:
+        pub = session.exec(select(Publication).where(Publication.job_id == j.id)).first()
+        result.append(JobSummary(
+            id=j.id, job_id=j.job_id, status=j.status, cell_count=j.cell_count,
+            mode=j.mode, original_filename=j.original_filename, created_at=j.created_at,
             annotation_count=len(j.annotations) if j.annotations else 0,
-        )
-        for j in jobs
-    ]
+            publication_id=pub.id if pub else None,
+        ))
+    return result
 
 
 # NOTE: this route must stay above /{job_id} so "export.csv" is not captured as a job_id
@@ -703,7 +798,8 @@ def delete_annotation(
 # ── File serving ──────────────────────────────────────────────────────────────
 
 @app.get("/files/{filename}")
-def get_file(filename: str) -> FileResponse:
+@limiter.limit("120/minute")
+def get_file(request: Request, filename: str) -> FileResponse:
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="Invalid filename.")
     target = (RESULT_DIR / filename).resolve()
@@ -774,10 +870,12 @@ def admin_update_role(
     # Only manager can promote to admin
     if data.role == "admin" and current.role != UserRole.manager:
         raise HTTPException(status_code=403, detail="Only a manager can assign the admin role.")
+    old_role = target.role
     target.role = UserRole(data.role)
     session.add(target)
     session.commit()
     session.refresh(target)
+    _log.info("AUDIT role_change actor=%s target=%s %s→%s", current.username, target.username, old_role.value, data.role)
     return UserResponse.model_validate(target)
 
 
@@ -798,8 +896,20 @@ def admin_delete_user(
     # Admin can only delete viewers/researchers
     if current.role == UserRole.admin and target.role not in _MANAGEABLE:
         raise HTTPException(status_code=403, detail="Admin cannot delete another admin.")
+    # Clean up owned records before deleting the user
+    for ann in session.exec(select(Annotation).where(Annotation.user_id == user_id)).all():
+        session.delete(ann)
+    for fav in session.exec(select(Favourite).where(Favourite.user_id == user_id)).all():
+        session.delete(fav)
+    for notif in session.exec(select(Notification).where(
+        (Notification.user_id == user_id) | (Notification.actor_id == user_id)
+    )).all():
+        session.delete(notif)
+    for comment in session.exec(select(Comment).where(Comment.user_id == user_id)).all():
+        session.delete(comment)
     session.delete(target)
     session.commit()
+    _log.info("AUDIT user_deleted actor=%s target=%s (role=%s)", current.username, target.username, target.role.value)
 
 
 @app.get("/admin/stats")
@@ -818,6 +928,378 @@ def admin_stats(
         "total_jobs": len(jobs),
         "total_cells": sum(j.cell_count for j in jobs),
     }
+
+
+# ── Explore / Publish / Favourites ───────────────────────────────────────────
+
+def _pub_to_response(pub: Publication, current_user_id: int, session: Session) -> PublicationResponse:
+    job = pub.job
+    fav = session.exec(
+        select(Favourite).where(Favourite.publication_id == pub.id, Favourite.user_id == current_user_id)
+    ).first()
+    comment_count = len(session.exec(select(Comment).where(Comment.publication_id == pub.id)).all())
+    return PublicationResponse(
+        id=pub.id,
+        job_id=pub.job_id,
+        user_id=pub.user_id,
+        job_uid=job.job_id if job else "",
+        username=pub.user.username if pub.user else "unknown",
+        headline=pub.headline,
+        description=pub.description,
+        cell_count=job.cell_count if job else 0,
+        mode=job.mode if job else "fallback-demo",
+        overlay_url=job.overlay_url if job else "",
+        mask_url=job.mask_url if job else "",
+        input_url=job.input_url if job else "",
+        original_filename=job.original_filename if job else "",
+        created_at=pub.created_at,
+        is_favourited=fav is not None,
+        comment_count=comment_count,
+    )
+
+
+@app.post("/api/jobs/{job_id}/publish", response_model=PublicationResponse, status_code=201)
+def publish_job(
+    job_id: str,
+    data: PublishRequest = Body(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> PublicationResponse:
+    job = JobService.get_job_by_job_id(session, job_id)
+    if job.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your job.")
+    existing = session.exec(select(Publication).where(Publication.job_id == job.id)).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="This job is already published.")
+    pub = Publication(
+        job_id=job.id,
+        user_id=current_user.id,
+        headline=data.headline,
+        description=data.description,
+    )
+    session.add(pub)
+    session.commit()
+    session.refresh(pub)
+    return _pub_to_response(pub, current_user.id, session)
+
+
+@app.delete("/api/publications/{pub_id}", status_code=204)
+def unpublish(
+    pub_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    pub = session.get(Publication, pub_id)
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publication not found.")
+    if pub.user_id != current_user.id and current_user.role not in _ELEVATED:
+        raise HTTPException(status_code=403, detail="Not your publication.")
+    session.exec(select(Favourite).where(Favourite.publication_id == pub_id))
+    for fav in session.exec(select(Favourite).where(Favourite.publication_id == pub_id)).all():
+        session.delete(fav)
+    session.delete(pub)
+    session.commit()
+
+
+@app.get("/api/explore", response_model=List[PublicationResponse])
+def explore(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> List[PublicationResponse]:
+    pubs = session.exec(select(Publication).order_by(Publication.created_at.desc())).all()
+    return [_pub_to_response(p, current_user.id, session) for p in pubs]
+
+
+@app.get("/api/jobs/{job_id}/publication", response_model=PublicationResponse)
+def get_job_publication(
+    job_id: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> PublicationResponse:
+    job = JobService.get_job_by_job_id(session, job_id)
+    pub = session.exec(select(Publication).where(Publication.job_id == job.id)).first()
+    if not pub:
+        raise HTTPException(status_code=404, detail="Not published.")
+    return _pub_to_response(pub, current_user.id, session)
+
+
+@app.post("/api/publications/{pub_id}/favourite", status_code=201)
+def add_favourite(
+    pub_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    pub = session.get(Publication, pub_id)
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publication not found.")
+    existing = session.exec(
+        select(Favourite).where(Favourite.publication_id == pub_id, Favourite.user_id == current_user.id)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Already in favourites.")
+    session.add(Favourite(publication_id=pub_id, user_id=current_user.id))
+    # Notify publication owner (not self)
+    if pub.user_id != current_user.id:
+        session.add(Notification(
+            user_id=pub.user_id, actor_id=current_user.id,
+            kind="favourite", publication_id=pub_id,
+        ))
+    session.commit()
+    return {"status": "added"}
+
+
+@app.delete("/api/publications/{pub_id}/favourite", status_code=204)
+def remove_favourite(
+    pub_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    fav = session.exec(
+        select(Favourite).where(Favourite.publication_id == pub_id, Favourite.user_id == current_user.id)
+    ).first()
+    if not fav:
+        raise HTTPException(status_code=404, detail="Not in favourites.")
+    session.delete(fav)
+    session.commit()
+
+
+@app.get("/api/favourites", response_model=List[PublicationResponse])
+def list_favourites(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> List[PublicationResponse]:
+    favs = session.exec(
+        select(Favourite).where(Favourite.user_id == current_user.id)
+        .order_by(Favourite.created_at.desc())
+    ).all()
+    result = []
+    for fav in favs:
+        pub = session.get(Publication, fav.publication_id)
+        if pub:
+            result.append(_pub_to_response(pub, current_user.id, session))
+    return result
+
+
+# ── Comments ──────────────────────────────────────────────────────────────────
+
+@app.get("/api/publications/{pub_id}/comments", response_model=List[CommentResponse])
+def list_comments(pub_id: int, session: Session = Depends(get_session),
+                  current_user: User = Depends(get_current_user)) -> List[CommentResponse]:
+    comments = session.exec(select(Comment).where(Comment.publication_id == pub_id)
+                            .order_by(Comment.created_at)).all()
+    result = []
+    for c in comments:
+        user = session.get(User, c.user_id)
+        result.append(CommentResponse(
+            id=c.id, publication_id=c.publication_id, user_id=c.user_id,
+            username=user.username if user else "unknown",
+            text=c.text, created_at=c.created_at,
+        ))
+    return result
+
+
+@app.post("/api/publications/{pub_id}/comments", response_model=CommentResponse, status_code=201)
+def add_comment(pub_id: int, data: CommentCreate = Body(...),
+                session: Session = Depends(get_session),
+                current_user: User = Depends(get_current_user)) -> CommentResponse:
+    pub = session.get(Publication, pub_id)
+    if not pub:
+        raise HTTPException(status_code=404, detail="Publication not found.")
+    comment = Comment(publication_id=pub_id, user_id=current_user.id, text=data.text)
+    session.add(comment)
+    if pub.user_id != current_user.id:
+        session.add(Notification(
+            user_id=pub.user_id, actor_id=current_user.id,
+            kind="comment", publication_id=pub_id,
+        ))
+    session.commit()
+    session.refresh(comment)
+    return CommentResponse(
+        id=comment.id, publication_id=comment.publication_id, user_id=comment.user_id,
+        username=current_user.username, text=comment.text, created_at=comment.created_at,
+    )
+
+
+@app.delete("/api/comments/{comment_id}", status_code=204)
+def delete_comment(comment_id: int, session: Session = Depends(get_session),
+                   current_user: User = Depends(get_current_user)):
+    comment = session.get(Comment, comment_id)
+    if not comment:
+        raise HTTPException(status_code=404, detail="Comment not found.")
+    if comment.user_id != current_user.id and current_user.role not in _ELEVATED:
+        raise HTTPException(status_code=403, detail="Not your comment.")
+    session.delete(comment)
+    session.commit()
+
+
+# ── Notifications ─────────────────────────────────────────────────────────────
+
+@app.get("/api/notifications", response_model=List[NotificationResponse])
+def list_notifications(session: Session = Depends(get_session),
+                       current_user: User = Depends(get_current_user)) -> List[NotificationResponse]:
+    notifs = session.exec(
+        select(Notification).where(Notification.user_id == current_user.id)
+        .order_by(Notification.created_at.desc()).limit(50)
+    ).all()
+    result = []
+    for n in notifs:
+        actor = session.get(User, n.actor_id)
+        pub = session.get(Publication, n.publication_id)
+        result.append(NotificationResponse(
+            id=n.id,
+            actor_username=actor.username if actor else "unknown",
+            kind=n.kind,
+            publication_id=n.publication_id,
+            publication_headline=pub.headline if pub else "",
+            read=n.read,
+            created_at=n.created_at,
+        ))
+    return result
+
+
+@app.post("/api/notifications/read-all", status_code=204)
+def mark_all_read(session: Session = Depends(get_session),
+                  current_user: User = Depends(get_current_user)):
+    notifs = session.exec(
+        select(Notification).where(Notification.user_id == current_user.id, Notification.read == False)
+    ).all()
+    for n in notifs:
+        n.read = True
+        session.add(n)
+    session.commit()
+
+
+@app.get("/api/notifications/unread-count")
+def unread_count(session: Session = Depends(get_session),
+                 current_user: User = Depends(get_current_user)) -> dict:
+    count = len(session.exec(
+        select(Notification).where(Notification.user_id == current_user.id, Notification.read == False)
+    ).all())
+    return {"count": count}
+
+
+# ── User profiles ─────────────────────────────────────────────────────────────
+
+@app.get("/api/users/{username}/publications", response_model=List[PublicationResponse])
+def user_publications(username: str, session: Session = Depends(get_session),
+                      current_user: User = Depends(get_current_user)) -> List[PublicationResponse]:
+    user = session.exec(select(User).where(User.username == username)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    pubs = session.exec(
+        select(Publication).where(Publication.user_id == user.id)
+        .order_by(Publication.created_at.desc())
+    ).all()
+    return [_pub_to_response(p, current_user.id, session) for p in pubs]
+
+
+# ── Re-analyze ────────────────────────────────────────────────────────────────
+
+@app.post("/api/jobs/{job_id}/reanalyze", response_model=AnalysisResponse, status_code=201)
+async def reanalyze_job(job_id: str, session: Session = Depends(get_session),
+                        current_user: User = Depends(get_current_user)) -> AnalysisResponse:
+    job = JobService.get_job_by_job_id(session, job_id)
+    if current_user.role not in _ELEVATED and job.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your job.")
+    upload_path = RESULT_DIR.parent / "uploads" / Path(job.input_url.split("/")[-1].replace("_input", ""))
+    # Fall back to the saved input PNG if original upload not found
+    input_png = RESULT_DIR / f"{job.job_id}_input.png"
+    source = input_png if input_png.exists() else None
+    if not source or not source.exists():
+        raise HTTPException(status_code=404, detail="Original image not found for re-analysis.")
+    image_bytes = source.read_bytes()
+    if not is_valid_image_bytes(image_bytes):
+        raise HTTPException(status_code=400, detail="Stored image is not valid.")
+    try:
+        result = analysis_service.analyze(image_bytes, job.original_filename)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    new_job = JobService.create_job(session, result, user_id=current_user.id)
+    return AnalysisResponse(**analysis_service.result_to_dict(result))
+
+
+# ── PDF Report ────────────────────────────────────────────────────────────────
+
+@app.get("/api/jobs/{job_id}/report.pdf")
+def download_pdf_report(
+    job_id: str,
+    tz_offset: int = Query(default=0, ge=-12, le=14),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
+    from reportlab.lib.styles import getSampleStyleSheet
+    import io as _io
+
+    job = JobService.get_job_by_job_id(session, job_id)
+    is_owner = job.user_id == current_user.id
+    is_elevated = current_user.role in _ELEVATED
+    is_published = session.exec(select(Publication).where(Publication.job_id == job.id)).first() is not None
+    if not (is_owner or is_elevated or is_published):
+        raise HTTPException(status_code=403, detail="Not your job.")
+
+    buf = _io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm,
+                            topMargin=2*cm, bottomMargin=2*cm)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Escape all user-controlled strings before passing to ReportLab Paragraph,
+    # which parses XML markup and would interpret tags like <font> or <b>.
+    def _p(text: str) -> str:
+        return _html.escape(str(text))
+
+    story.append(Paragraph("NucleiAI — Analysis Report", styles["Title"]))
+    story.append(Spacer(1, 0.4*cm))
+    story.append(Paragraph(f"Job ID: {_p(job.job_id)}", styles["Normal"]))
+    story.append(Paragraph(f"File: {_p(job.original_filename)}", styles["Normal"]))
+    local_tz = timezone(timedelta(hours=tz_offset))
+    tz_label = f"UTC{'+' if tz_offset >= 0 else ''}{tz_offset}:00"
+    story.append(Paragraph(f"Generated: {datetime.now(local_tz).strftime('%Y-%m-%d %H:%M')} ({tz_label})", styles["Normal"]))
+    story.append(Spacer(1, 0.6*cm))
+
+    data = [
+        ["Metric", "Value"],
+        ["Cell Count", str(job.cell_count)],
+        ["Mode", _p(job.mode)],
+        ["Device", _p(job.device)],
+        ["Image Size", f"{job.image_size}×{job.image_size}"],
+        ["Processing Time", f"{job.processing_ms} ms"],
+        ["Threshold", str(job.threshold) if job.threshold else "N/A (fallback)"],
+        ["Min Area Filter", str(job.min_area)],
+        ["Status", _p(job.status)],
+        ["Created", job.created_at.strftime("%Y-%m-%d %H:%M UTC")],
+    ]
+    t = Table(data, colWidths=[7*cm, 9*cm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e293b")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f8fafc"), colors.white]),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#e2e8f0")),
+        ("PADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 0.8*cm))
+
+    # Add overlay image if it exists
+    overlay_path = RESULT_DIR / f"{job.job_id}_overlay.png"
+    if overlay_path.exists():
+        story.append(Paragraph("Overlay Image", styles["Heading2"]))
+        story.append(Spacer(1, 0.3*cm))
+        img = RLImage(str(overlay_path), width=12*cm, height=12*cm)
+        story.append(img)
+
+    doc.build(story)
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.read()]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=nuclei-report-{job.job_id}.pdf"},
+    )
 
 
 # ── Reset DB (dev only — route not registered in production) ─────────────────

@@ -11,7 +11,9 @@ The real AI code in /src is never modified.
 
 from __future__ import annotations
 
+import logging
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass, asdict
@@ -20,6 +22,8 @@ from typing import Optional
 
 import cv2
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.append(str(ROOT))
@@ -49,14 +53,17 @@ RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 IMAGE_SIZE = 256
 THRESHOLD = 0.8       # corrected operating point from batch_count_refined.py
-MIN_AREA = 1
+MIN_AREA = 5  # tuned against XML ground-truth evaluation
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
-# Lazy singletons populated on first use
+# Lazy singletons populated on first use. The lock guards the first-load race
+# under concurrent requests; once _mode flips off "uninitialised" the fast path
+# is lock-free.
 _model = None
 _device = None
 _mode = "uninitialised"  # "model" | "fallback-demo" | "uninitialised"
 _load_error: Optional[str] = None
+_load_lock = threading.Lock()
 
 
 @dataclass
@@ -76,27 +83,31 @@ def _ensure_model_loaded() -> None:
     global _model, _device, _mode, _load_error
     if _mode != "uninitialised":
         return
-    try:
-        import torch
-        import segmentation_models_pytorch as smp
-        _device = "cuda" if torch.cuda.is_available() else "cpu"
-        model = smp.Unet(
-            encoder_name="resnet18",
-            encoder_weights=None,
-            in_channels=3,
-            classes=1,
-        ).to(_device)
-        if not CHECKPOINT_PATH.exists():
-            raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT_PATH}")
-        state = torch.load(CHECKPOINT_PATH, map_location=_device)
-        model.load_state_dict(state)
-        model.eval()
-        _model = model
-        _mode = "model"
-    except Exception as e:  # noqa: BLE001
-        _load_error = f"{type(e).__name__}: {e}"
-        _mode = "fallback-demo"
-        _model = None
+    with _load_lock:
+        if _mode != "uninitialised":  # re-check after acquiring lock
+            return
+        try:
+            import torch
+            import segmentation_models_pytorch as smp
+            _device = "cuda" if torch.cuda.is_available() else "cpu"
+            model = smp.Unet(
+                encoder_name="resnet18",
+                encoder_weights=None,
+                in_channels=3,
+                classes=1,
+            ).to(_device)
+            if not CHECKPOINT_PATH.exists():
+                raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT_PATH}")
+            state = torch.load(CHECKPOINT_PATH, map_location=_device)
+            model.load_state_dict(state)
+            model.eval()
+            _model = model
+            _mode = "model"
+        except Exception as e:  # noqa: BLE001
+            log.exception("model_load_failed")
+            _load_error = f"{type(e).__name__}: {e}"
+            _mode = "fallback-demo"
+            _model = None
 
 
 def get_health() -> dict:

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { listJobs, deleteJob, exportJobsCsv, type JobSummary } from "../api";
+import { listJobs, deleteJob, exportJobsCsv, unpublishPublication, formatDate, type JobSummary } from "../api";
 import { useConfirm } from "../components/ConfirmModal";
 import TrendChart from "../components/TrendChart";
 import { useToast } from "../contexts/ToastContext";
+import CustomSelect from "../components/CustomSelect";
 
 const PAGE_SIZE = 10;
 
@@ -150,16 +151,15 @@ export default function Dashboard() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          <select
-            className="field-input"
-            style={{ flex: "0 0 auto" }}
+          <CustomSelect
             value={modeFilter}
-            onChange={e => setModeFilter(e.target.value as typeof modeFilter)}
-          >
-            <option value="all">All modes</option>
-            <option value="model">Model only</option>
-            <option value="fallback-demo">Demo only</option>
-          </select>
+            onChange={v => setModeFilter(v)}
+            options={[
+              { value: "all", label: "All modes" },
+              { value: "model", label: "Model only" },
+              { value: "fallback-demo", label: "Demo only" },
+            ]}
+          />
           {(search || modeFilter !== "all") && (
             <button
               className="btn-ghost"
@@ -215,15 +215,37 @@ export default function Dashboard() {
                       <span className={`badge ${job.mode === "model" ? "badge-model" : "badge-fallback"}`}>
                         {job.mode}
                       </span>
+                      {job.publication_id && (
+                        <span className="badge" style={{ marginLeft: 6, fontSize: 10, background: "var(--accent-teal)", color: "#000" }}>
+                          Published
+                        </span>
+                      )}
                     </td>
                     <td>{job.annotation_count}</td>
-                    <td className="ts">{new Date(job.created_at).toLocaleString()}</td>
+                    <td className="ts">{formatDate(job.created_at)}</td>
                     <td>
-                      <button
-                        className="btn-ghost btn-danger"
-                        onClick={e => handleDelete(e, job.job_id)}
-                        title="Delete job"
-                      >✕</button>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        {job.publication_id && (
+                          <button
+                            className="btn-ghost"
+                            title="Unpublish from Explore"
+                            onClick={async e => {
+                              e.stopPropagation();
+                              if (!await confirm("Unpublish this analysis from Explore?")) return;
+                              try {
+                                await unpublishPublication(job.publication_id!);
+                                setJobs(prev => prev.map(j => j.job_id === job.job_id ? { ...j, publication_id: null } : j));
+                                toast("Unpublished.", "success");
+                              } catch (err) { toast(err instanceof Error ? err.message : String(err), "error"); }
+                            }}
+                          >🌐✕</button>
+                        )}
+                        <button
+                          className="btn-ghost btn-danger"
+                          onClick={e => handleDelete(e, job.job_id)}
+                          title="Delete job"
+                        >✕</button>
+                      </div>
                     </td>
                   </tr>
                 ))}
