@@ -2,6 +2,26 @@ import { Page } from "@playwright/test";
 
 const API = process.env.PLAYWRIGHT_API_URL || "http://localhost:8000";
 
+/** Attach console + network failure listeners so errors appear in CI log. */
+export function attachDebugListeners(page: Page): void {
+  page.on("console", msg => {
+    if (msg.type() === "error") {
+      console.log(`[BROWSER ERROR] ${msg.text()}`);
+    }
+  });
+  page.on("requestfailed", req => {
+    console.log(`[REQUEST FAILED] ${req.method()} ${req.url()} — ${req.failure()?.errorText}`);
+  });
+  page.on("response", async res => {
+    if (res.url().includes("/auth/me") || res.url().includes("/auth/login")) {
+      const status = res.status();
+      let body = "";
+      try { body = await res.text(); } catch { /* ignore */ }
+      console.log(`[RESPONSE] ${res.status()} ${res.url()} — ${body.slice(0, 200)}`);
+    }
+  });
+}
+
 /** Register + login via API, store token in localStorage.
  *  Navigates to /dashboard afterwards to guarantee the React AuthContext
  *  has finished its getMe() call before the test starts interacting. */
@@ -11,19 +31,24 @@ export async function loginAs(
   email: string,
   password = "Password123!"
 ): Promise<void> {
-  await page.request.post(`${API}/auth/register`, {
+  attachDebugListeners(page);
+
+  const regRes = await page.request.post(`${API}/auth/register`, {
     data: { username, email, password },
   });
-  const res = await page.request.post(`${API}/auth/login`, {
+  console.log(`[loginAs] register → ${regRes.status()} (${username} / ${email})`);
+
+  const loginRes = await page.request.post(`${API}/auth/login`, {
     data: { email, password },
   });
-  const body = await res.json();
+  const body = await loginRes.json();
   const token: string = body.access_token ?? "";
+  console.log(`[loginAs] login → ${loginRes.status()}, token=${token ? token.slice(0, 20) + "…" : "MISSING"}`);
+
   await page.goto("/");
   await page.evaluate((t) => localStorage.setItem("token", t), token);
-  // Navigate to dashboard so the React app mounts with the token and
-  // getMe() completes before control returns to the test.
   await page.goto("/dashboard", { waitUntil: "networkidle" });
+  console.log(`[loginAs] final URL = ${page.url()}`);
 }
 
 /** Register + login as admin via API (uses dev-only promote endpoint). */

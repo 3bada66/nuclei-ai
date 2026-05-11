@@ -160,6 +160,14 @@ jobs:
           path: web-programming/frontend/playwright-report/
           retention-days: 7
 
+      - name: Upload Playwright traces and screenshots
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-test-results
+          path: web-programming/frontend/test-results/
+          retention-days: 7
+
   # ── Deploy backend to Fly.io ────────────────────────────────────────────────
   deploy-backend:
     name: Deploy backend → Fly.io
