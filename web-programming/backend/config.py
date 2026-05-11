@@ -11,6 +11,13 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
 ENV: str = os.getenv("ENV", "development")
+
+# Guard against accidentally deploying with development settings.
+# Rate limits, docs exposure, and dev endpoints all depend on this being correct.
+if ENV not in ("development", "staging", "production"):
+    print(f"FATAL: ENV='{ENV}' is not a recognised value. Use development, staging, or production.", file=sys.stderr)
+    sys.exit(1)
+
 DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./nuclei.db")
 
 _raw_secret = os.getenv("SECRET_KEY", "")

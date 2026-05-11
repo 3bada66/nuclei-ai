@@ -2,22 +2,31 @@ import { Page } from "@playwright/test";
 
 const API = process.env.PLAYWRIGHT_API_URL || "http://localhost:8000";
 
-/** Attach console + network failure listeners so errors appear in CI log. */
+// Track which pages already have debug listeners so we never double-attach.
+const _debugged = new WeakSet<Page>();
+
+/** Attach console + network failure listeners once per page. */
 export function attachDebugListeners(page: Page): void {
+  if (_debugged.has(page)) return;
+  _debugged.add(page);
+
   page.on("console", msg => {
     if (msg.type() === "error") {
       console.log(`[BROWSER ERROR] ${msg.text()}`);
     }
   });
+
   page.on("requestfailed", req => {
     console.log(`[REQUEST FAILED] ${req.method()} ${req.url()} — ${req.failure()?.errorText}`);
   });
+
   page.on("response", async res => {
-    if (res.url().includes("/auth/me") || res.url().includes("/auth/login")) {
-      const status = res.status();
-      let body = "";
-      try { body = await res.text(); } catch { /* ignore */ }
+    if (!res.url().includes("/auth/me") && !res.url().includes("/auth/login")) return;
+    try {
+      const body = await res.text();
       console.log(`[RESPONSE] ${res.status()} ${res.url()} — ${body.slice(0, 200)}`);
+    } catch {
+      console.log(`[RESPONSE] ${res.status()} ${res.url()} — (body unavailable)`);
     }
   });
 }
@@ -41,8 +50,8 @@ export async function loginAs(
   const loginRes = await page.request.post(`${API}/auth/login`, {
     data: { email, password },
   });
-  const body = await loginRes.json();
-  const token: string = body.access_token ?? "";
+  const loginBody = await loginRes.json();
+  const token: string = loginBody.access_token ?? "";
   console.log(`[loginAs] login → ${loginRes.status()}, token=${token ? token.slice(0, 20) + "…" : "MISSING"}`);
 
   await page.goto("/");
@@ -51,28 +60,35 @@ export async function loginAs(
   console.log(`[loginAs] final URL = ${page.url()}`);
 }
 
-/** Register + login as admin via API (uses dev-only promote endpoint). */
+/** Register + login as admin via API (uses dev-only promote endpoint).
+ *  /dev/promote-admin is only registered when ENV != "production" and
+ *  requires no auth — it is intentionally an unauthenticated dev utility. */
 export async function loginAsAdmin(
   page: Page,
   username: string,
   email: string,
   password = "Password123!"
 ): Promise<void> {
-  await page.request.post(`${API}/auth/register`, {
+  attachDebugListeners(page);
+
+  const regRes = await page.request.post(`${API}/auth/register`, {
     data: { username, email, password },
   });
-  // Promote to admin via dev-only endpoint
-  await page.request.post(`${API}/dev/promote-admin`, {
-    data: { email },
-  });
-  const res = await page.request.post(`${API}/auth/login`, {
+  console.log(`[loginAsAdmin] register → ${regRes.status()} (${username})`);
+
+  await page.request.post(`${API}/dev/promote-admin`, { data: { email } });
+
+  const loginRes = await page.request.post(`${API}/auth/login`, {
     data: { email, password },
   });
-  const body = await res.json();
-  const token: string = body.access_token ?? "";
+  const loginBody = await loginRes.json();
+  const token: string = loginBody.access_token ?? "";
+  console.log(`[loginAsAdmin] login → ${loginRes.status()}, token=${token ? token.slice(0, 20) + "…" : "MISSING"}`);
+
   await page.goto("/");
   await page.evaluate((t) => localStorage.setItem("token", t), token);
   await page.goto("/dashboard", { waitUntil: "networkidle" });
+  console.log(`[loginAsAdmin] final URL = ${page.url()}`);
 }
 
 /** Navigate to a page and wait for network idle. */
