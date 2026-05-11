@@ -178,7 +178,7 @@ def health(session: Session = Depends(get_session)) -> HealthResponse:
 # ── Auth: Register / Login / Me ───────────────────────────────────────────────
 
 @app.post("/auth/register", response_model=UserResponse, status_code=201)
-@limiter.limit("10/minute")
+@limiter.limit("60/minute" if ENV != "production" else "10/minute")
 async def register(
     request: Request,
     data: RegisterRequest = Body(...),
@@ -210,7 +210,7 @@ async def register(
 
 
 @app.post("/auth/login")
-@limiter.limit("5/minute")
+@limiter.limit("60/minute" if ENV != "production" else "5/minute")
 async def login(
     request: Request,
     data: LoginRequest = Body(...),
