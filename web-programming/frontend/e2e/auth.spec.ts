@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { loginAs } from "./helpers";
 
 test.describe("Auth flows", () => {
   test("register page renders and links to login", async ({ page }) => {
@@ -49,20 +50,12 @@ test.describe("Auth flows", () => {
 
   test("logout clears session and redirects to login", async ({ page }) => {
     const ts = Date.now();
-    // Clear any previous auth state from earlier tests
-    await page.goto("/");
-    await page.evaluate(() => localStorage.clear());
-    // Register + login via UI
-    await page.goto("/register", { waitUntil: "networkidle" });
-    await page.getByLabel(/username/i).fill(`logoutuser${ts}`);
-    await page.getByLabel(/email/i).fill(`logoutuser${ts}@test.com`);
-    await page.getByLabel(/password/i).fill("Password123!");
-    await page.getByRole("button", { name: /create account/i }).click();
-    await expect(page).toHaveURL(/dashboard|analyze/, { timeout: 10_000 });
-
-    // Click logout (button has title="Sign out")
+    await loginAs(page, `logoutuser${ts}`, `logoutuser${ts}@test.com`);
+    // loginAs lands on /dashboard — verify we're there
+    await expect(page).toHaveURL(/dashboard/, { timeout: 5_000 });
+    // Click logout button
     const logoutBtn = page.getByTitle("Sign out");
-    await expect(logoutBtn).toBeVisible();
+    await expect(logoutBtn).toBeVisible({ timeout: 5_000 });
     await logoutBtn.click();
     await expect(page).toHaveURL(/login/, { timeout: 5_000 });
   });

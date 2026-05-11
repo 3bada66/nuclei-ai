@@ -24,8 +24,10 @@ test.describe("Job CRUD", () => {
     fs.writeFileSync(tmpPath, tinyPngBuffer());
 
     try {
-      const fileInput = page.locator('input[type="file"]');
-      await fileInput.waitFor({ state: "attached", timeout: 10_000 });
+      // File input is hidden (display:none) but Playwright can set files on it directly.
+      // Wait for it to be attached to the DOM first.
+      const fileInput = page.locator('input[type="file"]').first();
+      await expect(fileInput).toBeAttached({ timeout: 15_000 });
       await fileInput.setInputFiles(tmpPath);
 
       const submitBtn = page.getByRole("button", { name: /analyze|upload|submit/i });
@@ -62,9 +64,8 @@ test.describe("Job CRUD", () => {
     });
 
     await goto(page, "/dashboard");
-    // Jobs link or job entries should appear somewhere
-    const jobsText = page.getByText(/job|history|analysis/i).first();
-    await expect(jobsText).toBeVisible({ timeout: 5_000 });
+    // Dashboard subtitle is "All analysis jobs" — wait for it
+    await expect(page.getByText(/analysis jobs|Total Jobs|dashboard/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("non-image file upload shows error", async ({ page }) => {

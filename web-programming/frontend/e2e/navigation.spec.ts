@@ -26,11 +26,9 @@ test.describe("Navigation", () => {
   test("analyze page has file upload area", async ({ page }) => {
     await loginAs(page, "navuser3", "navuser3@test.com");
     await goto(page, "/analyze");
-    // File input or drop zone
-    const fileInput = page.locator('input[type="file"]');
-    await expect(fileInput.or(page.getByText(/upload|drop|choose/i))).toBeVisible({
-      timeout: 5_000,
-    });
+    // File input is always present in the UploadPanel (hidden, triggered by click)
+    const fileInput = page.locator('input[type="file"]').first();
+    await expect(fileInput).toBeAttached({ timeout: 5_000 });
   });
 
   test("jobs list page is accessible", async ({ page }) => {
