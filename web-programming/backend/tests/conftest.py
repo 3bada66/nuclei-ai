@@ -119,5 +119,23 @@ def register_and_login(client: TestClient, username: str, email: str,
     return r.json()["access_token"]
 
 
+def make_admin(session, email: str) -> None:
+    """Promote a registered user to admin directly via the DB."""
+    from sqlmodel import select
+    from backend.models import User, UserRole
+    user = session.exec(select(User).where(User.email == email)).first()
+    user.role = UserRole.admin
+    session.add(user)
+    session.commit()
+
+
+def register_and_login_as_admin(client: TestClient, session, username: str,
+                                email: str, password: str = "TestPass1!") -> str:
+    """Register, promote to admin, then login. Returns token."""
+    token = register_and_login(client, username, email, password)
+    make_admin(session, email)
+    return token
+
+
 def auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}

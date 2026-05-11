@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import select
 
 from backend.models import User, UserRole
-from backend.tests.conftest import auth, register_and_login
+from backend.tests.conftest import auth, register_and_login, register_and_login_as_admin
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -45,8 +45,8 @@ def _promote(session, email: str, role: UserRole):
 
 # ── Jobs visibility ───────────────────────────────────────────────────────────
 
-def test_admin_sees_all_jobs(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_sees_all_jobs(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     viewer_token = register_and_login(client, "viewer", "viewer@test.com")
     _upload(client, admin_token)
     _upload(client, viewer_token)
@@ -54,8 +54,8 @@ def test_admin_sees_all_jobs(client: TestClient):
     assert len(r.json()) == 2
 
 
-def test_viewer_sees_only_own_jobs(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_viewer_sees_only_own_jobs(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     viewer_token = register_and_login(client, "viewer", "viewer@test.com")
     _upload(client, admin_token)
     _upload(client, viewer_token)
@@ -63,8 +63,8 @@ def test_viewer_sees_only_own_jobs(client: TestClient):
     assert len(r.json()) == 1
 
 
-def test_viewer_cannot_access_others_job(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_viewer_cannot_access_others_job(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     viewer_token = register_and_login(client, "viewer", "viewer@test.com")
     admin_job_id = _upload(client, admin_token)
     r = client.get(f"/api/jobs/{admin_job_id}", headers=auth(viewer_token))
@@ -74,20 +74,17 @@ def test_viewer_cannot_access_others_job(client: TestClient):
 # ── Admin page access control ─────────────────────────────────────────────────
 
 def test_viewer_blocked_from_admin_list(client: TestClient):
-    register_and_login(client, "admin", "admin@test.com")
     viewer_token = register_and_login(client, "viewer", "viewer@test.com")
     assert client.get("/admin/users", headers=auth(viewer_token)).status_code == 403
 
 
 def test_researcher_blocked_from_admin_list(client: TestClient, session):
-    register_and_login(client, "admin", "admin@test.com")
     r_token = register_and_login(client, "res", "res@test.com")
     _promote(session, "res@test.com", UserRole.researcher)
     assert client.get("/admin/users", headers=auth(r_token)).status_code == 403
 
 
 def test_viewer_blocked_from_admin_stats(client: TestClient):
-    register_and_login(client, "admin", "admin@test.com")
     viewer_token = register_and_login(client, "viewer", "viewer@test.com")
     assert client.get("/admin/stats", headers=auth(viewer_token)).status_code == 403
 
@@ -117,8 +114,8 @@ def test_manager_can_create_admin(client: TestClient, session):
     assert r.json()["role"] == "admin"
 
 
-def test_admin_cannot_create_admin(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_cannot_create_admin(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     r = client.post("/admin/users", json={
         "username": "newadmin", "email": "newadmin@test.com", "password": "TestPass1!",
     }, headers=auth(admin_token))
@@ -126,7 +123,6 @@ def test_admin_cannot_create_admin(client: TestClient):
 
 
 def test_viewer_cannot_create_admin(client: TestClient):
-    register_and_login(client, "admin", "admin@test.com")
     viewer_token = register_and_login(client, "viewer", "viewer@test.com")
     r = client.post("/admin/users", json={
         "username": "newadmin", "email": "newadmin@test.com", "password": "TestPass1!",
@@ -163,13 +159,13 @@ def test_manager_can_change_researcher_to_viewer(client: TestClient, session):
 
 # ── 5. Admin can access admin page ────────────────────────────────────────────
 
-def test_admin_can_access_admin_page(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_can_access_admin_page(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     assert client.get("/admin/users", headers=auth(admin_token)).status_code == 200
 
 
-def test_admin_can_list_users(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_can_list_users(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     register_and_login(client, "bob", "bob@test.com")
     r = client.get("/admin/users", headers=auth(admin_token))
     assert r.status_code == 200
@@ -178,8 +174,8 @@ def test_admin_can_list_users(client: TestClient):
 
 # ── 6. Admin can change viewer/researcher roles only ─────────────────────────
 
-def test_admin_can_change_viewer_to_researcher(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_can_change_viewer_to_researcher(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     viewer = client.post("/auth/register", json={
         "username": "view1", "email": "view1@test.com", "password": "TestPass1!",
     }).json()
@@ -274,8 +270,8 @@ def test_cannot_register_as_manager(client: TestClient):
 
 # ── 14. Nobody can change own role ────────────────────────────────────────────
 
-def test_nobody_can_change_own_role(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_nobody_can_change_own_role(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     me = client.get("/auth/me", headers=auth(admin_token)).json()
     r = client.patch(f"/admin/users/{me['id']}/role",
                      json={"role": "viewer"}, headers=auth(admin_token))
@@ -284,15 +280,15 @@ def test_nobody_can_change_own_role(client: TestClient):
 
 # ── Existing tests preserved ──────────────────────────────────────────────────
 
-def test_admin_cannot_delete_themselves(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_cannot_delete_themselves(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     me = client.get("/auth/me", headers=auth(admin_token)).json()
     r = client.delete(f"/admin/users/{me['id']}", headers=auth(admin_token))
     assert r.status_code == 400
 
 
-def test_admin_can_delete_viewer(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_can_delete_viewer(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     viewer = client.post("/auth/register", json={
         "username": "view1", "email": "view1@test.com", "password": "TestPass1!",
     }).json()
@@ -300,8 +296,8 @@ def test_admin_can_delete_viewer(client: TestClient):
     assert r.status_code == 204
 
 
-def test_admin_stats(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_stats(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     r = client.get("/admin/stats", headers=auth(admin_token))
     assert r.status_code == 200
     body = r.json()

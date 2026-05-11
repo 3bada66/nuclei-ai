@@ -17,14 +17,14 @@ def test_register_success(client: TestClient):
     assert "hashed_password" not in data
 
 
-def test_first_user_becomes_admin(client: TestClient):
+def test_all_new_users_become_viewer(client: TestClient):
     r = client.post("/auth/register", json={
         "username": "first", "email": "first@test.com", "password": "TestPass1!",
     })
-    assert r.json()["role"] == "admin"
+    assert r.json()["role"] == "viewer"
 
 
-def test_second_user_becomes_viewer(client: TestClient):
+def test_second_user_also_viewer(client: TestClient):
     client.post("/auth/register", json={
         "username": "first", "email": "first@test.com", "password": "TestPass1!",
     })

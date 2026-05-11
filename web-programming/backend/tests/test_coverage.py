@@ -21,7 +21,7 @@ from backend.auth_utils import (
 )
 from backend.crud import UserService
 from backend.models import User, UserRole
-from backend.tests.conftest import auth, register_and_login
+from backend.tests.conftest import auth, register_and_login, register_and_login_as_admin
 
 
 # ── validate_password_strength uncovered branches ─────────────────────────────
@@ -228,8 +228,8 @@ def test_login_password_rejected_for_oauth_account(client: TestClient, session):
 
 # ── main.py: self_update_role blocked for admin/manager (lines 256-262) ──────
 
-def test_admin_cannot_self_update_role(client: TestClient):
-    token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_cannot_self_update_role(client: TestClient, session):
+    token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     r = client.patch("/auth/me/role", json={"role": "viewer"}, headers=auth(token))
     assert r.status_code == 403
 
@@ -303,8 +303,8 @@ def test_admin_create_admin_duplicate_email(client: TestClient, session):
 
 # ── main.py: admin update role user not found (line 772) ─────────────────────
 
-def test_admin_update_role_user_not_found(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_update_role_user_not_found(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     r = client.patch("/admin/users/999999/role",
                      json={"role": "viewer"}, headers=auth(admin_token))
     assert r.status_code == 404
@@ -312,8 +312,8 @@ def test_admin_update_role_user_not_found(client: TestClient):
 
 # ── main.py: admin assign admin role by non-manager (line 783) ───────────────
 
-def test_admin_cannot_assign_admin_role(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_cannot_assign_admin_role(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     viewer = client.post("/auth/register", json={
         "username": "viewer1", "email": "viewer1@test.com", "password": "TestPass1!",
     }).json()
@@ -324,8 +324,8 @@ def test_admin_cannot_assign_admin_role(client: TestClient):
 
 # ── main.py: admin delete user not found (line 801) ──────────────────────────
 
-def test_admin_delete_user_not_found(client: TestClient):
-    admin_token = register_and_login(client, "admin", "admin@test.com")
+def test_admin_delete_user_not_found(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "admin", "admin@test.com")
     r = client.delete("/admin/users/999999", headers=auth(admin_token))
     assert r.status_code == 404
 

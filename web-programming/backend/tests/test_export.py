@@ -6,7 +6,7 @@ import zlib
 import csv
 
 from fastapi.testclient import TestClient
-from backend.tests.conftest import auth, register_and_login
+from backend.tests.conftest import auth, register_and_login, register_and_login_as_admin
 
 
 def _tiny_png() -> bytes:
@@ -80,8 +80,8 @@ def test_export_one_row_per_job(client: TestClient):
     assert len(rows) == 3  # header + 2 data rows
 
 
-def test_viewer_exports_only_own_jobs(client: TestClient):
-    admin_token = register_and_login(client, "adm_exp", "adm_exp@test.com")
+def test_viewer_exports_only_own_jobs(client: TestClient, session):
+    admin_token = register_and_login_as_admin(client, session, "adm_exp", "adm_exp@test.com")
     viewer_token = register_and_login(client, "view_exp", "view_exp@test.com")
 
     _upload(client, admin_token)
