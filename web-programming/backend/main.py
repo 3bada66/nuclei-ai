@@ -10,7 +10,7 @@ import html as _html
 import io
 import logging
 import secrets
-import threading
+import threading  # used for _oauth_codes_lock
 from contextlib import asynccontextmanager
 
 import httpx
@@ -147,20 +147,6 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
 
-# Reject bodies larger than 25 MB at the framework level before routes run
-from starlette.middleware.base import BaseHTTPMiddleware as _Base
-
-class _BodySizeLimitMiddleware(_Base):
-    _limit = 25 * 1024 * 1024
-
-    async def dispatch(self, request: Request, call_next):
-        content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > self._limit:
-            from starlette.responses import JSONResponse
-            return JSONResponse({"detail": "Request body too large."}, status_code=413)
-        return await call_next(request)
-
-app.add_middleware(_BodySizeLimitMiddleware)
 
 # CORS: only allow localhost origins in development
 _cors_origins = [FRONTEND_URL]
