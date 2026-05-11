@@ -7,7 +7,7 @@ test.describe("Navigation", () => {
     await goto(page, "/dashboard");
     // Some heading or key text should be visible
     await expect(
-      page.getByRole("heading").or(page.getByText(/dashboard|welcome|nuclei/i))
+      page.getByRole("heading").or(page.getByText(/dashboard|welcome|nuclei/i)).first()
     ).toBeVisible();
   });
 

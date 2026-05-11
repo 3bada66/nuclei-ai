@@ -99,10 +99,10 @@ export default function LoginPage() {
 
         {tab === "password" && (
           <form className="auth-form" onSubmit={handlePasswordLogin}>
-            <label className="field-label">Email</label>
-            <input className="field-input" type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" />
-            <label className="field-label">Password</label>
-            <input className="field-input" type="password" required value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" />
+            <label className="field-label" htmlFor="login-email">Email</label>
+            <input id="login-email" className="field-input" type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" aria-label="Email" />
+            <label className="field-label" htmlFor="login-password">Password</label>
+            <input id="login-password" className="field-input" type="password" required value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" aria-label="Password" />
             {error && <div className="error">{error}</div>}
             <button className="btn btn-full" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
             <p style={{ textAlign: "center", marginTop: 8 }}>

@@ -35,7 +35,7 @@ test.describe("Job CRUD", () => {
       await expect(
         page.getByText(/cell|count|result|nuclei|\d+/i).or(
           page.getByRole("progressbar")
-        )
+        ).first()
       ).toBeVisible({ timeout: 20_000 });
     } finally {
       fs.unlinkSync(tmpPath);
@@ -81,7 +81,7 @@ test.describe("Job CRUD", () => {
       const submitBtn = page.getByRole("button", { name: /analyze|upload|submit/i });
       if (await submitBtn.isEnabled()) {
         await submitBtn.click();
-        await expect(page.getByText(/error|invalid|image|unsupported/i)).toBeVisible({
+        await expect(page.getByText(/error|invalid|image|unsupported/i).first()).toBeVisible({
           timeout: 5_000,
         });
       }

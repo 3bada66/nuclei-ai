@@ -37,8 +37,9 @@ export default function RegisterPage() {
         <h2 className="auth-title">Create account</h2>
 
         <form className="auth-form" onSubmit={handleSubmit}>
-          <label className="field-label">Username</label>
+          <label className="field-label" htmlFor="reg-username">Username</label>
           <input
+            id="reg-username"
             className="field-input"
             type="text"
             required
@@ -47,18 +48,22 @@ export default function RegisterPage() {
             value={username}
             onChange={e => setUsername(e.target.value)}
             autoComplete="username"
+            aria-label="Username"
           />
-          <label className="field-label">Email</label>
+          <label className="field-label" htmlFor="reg-email">Email</label>
           <input
+            id="reg-email"
             className="field-input"
             type="email"
             required
             value={email}
             onChange={e => setEmail(e.target.value)}
             autoComplete="email"
+            aria-label="Email"
           />
-          <label className="field-label">Password <span className="field-hint">(uppercase, lowercase, number, special character)</span></label>
+          <label className="field-label" htmlFor="reg-password">Password <span className="field-hint">(uppercase, lowercase, number, special character)</span></label>
           <input
+            id="reg-password"
             className="field-input"
             type="password"
             required
@@ -66,6 +71,7 @@ export default function RegisterPage() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             autoComplete="new-password"
+            aria-label="Password"
           />
           {error && <div className="error">{error}</div>}
           <button className="btn btn-full" type="submit" disabled={busy}>

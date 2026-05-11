@@ -1288,7 +1288,7 @@ def download_pdf_report(
     )
 
 
-# ── Reset DB (dev only — route not registered in production) ─────────────────
+# ── Dev-only utilities ────────────────────────────────────────────────────────
 
 if ENV != "production":
     @app.post("/reset-db", include_in_schema=False)
@@ -1298,3 +1298,13 @@ if ENV != "production":
                 conn.execute(text(f"DELETE FROM {table.name}"))
             conn.commit()
         return {"status": "reset"}
+
+    @app.post("/dev/promote-admin", include_in_schema=False)
+    def dev_promote_admin(data: dict = Body(...), session: Session = Depends(get_session)) -> dict:
+        """CI/dev only: promote a user to admin by email. Never registered in production."""
+        user = session.exec(select(User).where(User.email == data["email"])).first()
+        if user:
+            user.role = UserRole.admin
+            session.add(user)
+            session.commit()
+        return {"ok": True}
