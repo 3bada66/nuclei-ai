@@ -1,0 +1,5 @@
+Image: TCGA-18-5592-01Z-00-DX1
+Predicted count: 301
+Ground truth count: 294
+Absolute error: 7
+Squared error: 49

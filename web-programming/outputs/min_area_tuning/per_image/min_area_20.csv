@@ -1,0 +1,5 @@
+image_name,predicted_count,ground_truth_count,absolute_error,squared_error
+TCGA-49-4488-01Z-00-DX1,206,271,65,4225
+TCGA-UZ-A9PN-01Z-00-DX1,180,520,340,115600
+TCGA-HE-7130-01Z-00-DX1,160,657,497,247009
+TCGA-A7-A13E-01Z-00-DX1,198,257,59,3481

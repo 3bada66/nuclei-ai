@@ -1,0 +1,525 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Report 4 Prototype Dashboard</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 32px;
+            background: #f7f7f7;
+            color: #111;
+        }
+
+        h1, h2, h3 {
+            color: #0b1f3a;
+        }
+
+        .card {
+            background: white;
+            padding: 20px;
+            margin-bottom: 24px;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+        }
+
+        pre {
+            background: #111;
+            color: #f1f1f1;
+            padding: 16px;
+            border-radius: 8px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+
+        .data-table {
+            border-collapse: collapse;
+            width: 100%;
+            background: white;
+            margin-top: 12px;
+        }
+
+        .data-table th,
+        .data-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            font-size: 14px;
+        }
+
+        .data-table th {
+            background: #e8eef8;
+            text-align: left;
+        }
+
+        .case-block {
+            background: white;
+            padding: 20px;
+            margin-bottom: 24px;
+            border-radius: 12px;
+            border: 1px solid #ddd;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+        }
+
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+
+        .image-card {
+            background: #fafafa;
+            padding: 12px;
+            border-radius: 10px;
+            border: 1px solid #ddd;
+        }
+
+        .image-card h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+
+        .image-card img {
+            width: 100%;
+            max-height: 320px;
+            object-fit: contain;
+            border: 1px solid #ccc;
+            background: white;
+        }
+
+        .missing {
+            padding: 16px;
+            background: #ffe0e0;
+            border: 1px solid #cc0000;
+            border-radius: 8px;
+            color: #800000;
+            font-weight: bold;
+        }
+
+        .note {
+            background: #fff8dc;
+            padding: 12px;
+            border-left: 5px solid #d69e00;
+            margin-top: 12px;
+        }
+
+        .small {
+            font-size: 14px;
+            color: #444;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Report 4 Prototype Dashboard</h1>
+
+    <div class="card">
+        <h2>Project</h2>
+        <p><b>AI-Based Cell Nuclei Segmentation and Counting in Microscopy Images</b></p>
+        <p>
+            This dashboard integrates the corrected counting pipeline, density heatmap outputs,
+            morphology features, and qualitative visual evidence for Progress Report 4.
+        </p>
+
+        <div class="note">
+            Corrected baseline used for Report 4:
+            <b>Threshold = 0.8</b>,
+            <b>MIN_AREA = 1 for counting</b>,
+            and <b>XML-based ground-truth counts</b>.
+            Morphology uses <b>MIN_AREA = 5</b> only to make shape measurements more stable.
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Counting Summary</h2>
+        <pre>Counting summary (XML ground truth)
+Threshold: 0.8
+MIN_AREA: 1
+Processed images: 37
+Average MAE: 276.7568
+Average MSE: 163615.2973
+
+Best example:
+Image: TCGA-AR-A1AK-01Z-00-DX1
+Predicted count: 413
+Ground truth count: 433
+Absolute error: 20
+Squared error: 400
+
+Worst example:
+Image: TCGA-HE-7130-01Z-00-DX1
+Predicted count: 607
+Ground truth count: 1862
+Absolute error: 1255
+Squared error: 1575025
+</pre>
+    </div>
+
+    <div class="card">
+        <h2>Selected Best/Worst Counting Cases</h2>
+        <p class="small">
+            These cases are selected from the corrected XML-based evaluation and are used
+            as qualitative evidence in Report 4.
+        </p>
+        <table class="dataframe data-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>image_name</th>
+      <th>predicted_count</th>
+      <th>ground_truth_count</th>
+      <th>absolute_error</th>
+      <th>squared_error</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TCGA-AR-A1AK-01Z-00-DX1</td>
+      <td>413</td>
+      <td>433</td>
+      <td>20</td>
+      <td>400</td>
+    </tr>
+    <tr>
+      <td>TCGA-38-6178-01Z-00-DX1</td>
+      <td>404</td>
+      <td>424</td>
+      <td>20</td>
+      <td>400</td>
+    </tr>
+    <tr>
+      <td>TCGA-HE-7129-01Z-00-DX1</td>
+      <td>502</td>
+      <td>1585</td>
+      <td>1083</td>
+      <td>1172889</td>
+    </tr>
+    <tr>
+      <td>TCGA-HE-7130-01Z-00-DX1</td>
+      <td>607</td>
+      <td>1862</td>
+      <td>1255</td>
+      <td>1575025</td>
+    </tr>
+  </tbody>
+</table>
+    </div>
+
+    <div class="card">
+        <h2>Morphology Summary Preview</h2>
+        <p class="small">
+            Morphology features include area, perimeter, circularity, eccentricity,
+            centroid coordinates, and bounding-box values.
+        </p>
+        <table class="dataframe data-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>image_name</th>
+      <th>predicted_components_after_morphology_filter</th>
+      <th>morphology_min_area</th>
+      <th>mean_area</th>
+      <th>median_area</th>
+      <th>mean_perimeter</th>
+      <th>mean_circularity</th>
+      <th>mean_eccentricity</th>
+      <th>min_area</th>
+      <th>max_area</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TCGA-18-5592-01Z-00-DX1</td>
+      <td>237</td>
+      <td>5</td>
+      <td>15.8987</td>
+      <td>13.0</td>
+      <td>15.1548</td>
+      <td>0.8474</td>
+      <td>0.7905</td>
+      <td>5.0</td>
+      <td>93.0</td>
+    </tr>
+    <tr>
+      <td>TCGA-21-5784-01Z-00-DX1</td>
+      <td>201</td>
+      <td>5</td>
+      <td>20.3284</td>
+      <td>18.0</td>
+      <td>17.2376</td>
+      <td>0.8618</td>
+      <td>0.7365</td>
+      <td>5.0</td>
+      <td>93.0</td>
+    </tr>
+    <tr>
+      <td>TCGA-21-5786-01Z-00-DX1</td>
+      <td>233</td>
+      <td>5</td>
+      <td>18.5923</td>
+      <td>16.0</td>
+      <td>16.5527</td>
+      <td>0.8514</td>
+      <td>0.7491</td>
+      <td>5.0</td>
+      <td>85.0</td>
+    </tr>
+    <tr>
+      <td>TCGA-38-6178-01Z-00-DX1</td>
+      <td>358</td>
+      <td>5</td>
+      <td>25.0307</td>
+      <td>19.5</td>
+      <td>19.8086</td>
+      <td>0.8122</td>
+      <td>0.7521</td>
+      <td>5.0</td>
+      <td>96.0</td>
+    </tr>
+    <tr>
+      <td>TCGA-49-4488-01Z-00-DX1</td>
+      <td>316</td>
+      <td>5</td>
+      <td>49.9430</td>
+      <td>38.0</td>
+      <td>30.0531</td>
+      <td>0.7524</td>
+      <td>0.7604</td>
+      <td>5.0</td>
+      <td>332.0</td>
+    </tr>
+    <tr>
+      <td>TCGA-50-5931-01Z-00-DX1</td>
+      <td>383</td>
+      <td>5</td>
+      <td>26.5979</td>
+      <td>21.0</td>
+      <td>20.9914</td>
+      <td>0.7849</td>
+      <td>0.7650</td>
+      <td>5.0</td>
+      <td>142.0</td>
+    </tr>
+    <tr>
+      <td>TCGA-A7-A13E-01Z-00-DX1</td>
+      <td>310</td>
+      <td>5</td>
+      <td>26.7806</td>
+      <td>21.0</td>
+      <td>19.7457</td>
+      <td>0.8488</td>
+      <td>0.7146</td>
+      <td>5.0</td>
+      <td>152.0</td>
+    </tr>
+    <tr>
+      <td>TCGA-A7-A13F-01Z-00-DX1</td>
+      <td>243</td>
+      <td>5</td>
+      <td>27.5761</td>
+      <td>21.0</td>
+      <td>21.1301</td>
+      <td>0.7976</td>
+      <td>0.7757</td>
+      <td>6.0</td>
+      <td>107.0</td>
+    </tr>
+  </tbody>
+</table>
+    </div>
+
+    <div class="card">
+        <h2>Density Summary Preview</h2>
+        <p class="small">
+            Density heatmaps summarize predicted nuclei distribution using grid-based tile counts.
+        </p>
+        <table class="dataframe data-table">
+  <thead>
+    <tr style="text-align: right;">
+      <th>image_name</th>
+      <th>predicted_count_from_mask</th>
+      <th>grid_size</th>
+      <th>max_tile_count</th>
+      <th>non_empty_tiles</th>
+      <th>density_heatmap_path</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TCGA-18-5592-01Z-00-DX1</td>
+      <td>324</td>
+      <td>8</td>
+      <td>11</td>
+      <td>63</td>
+      <td>C:\Users\ph\Desktop\project\outputs\density_maps\TCGA-18-5592-01Z-00-DX1_density_heatmap.png</td>
+    </tr>
+    <tr>
+      <td>TCGA-21-5784-01Z-00-DX1</td>
+      <td>244</td>
+      <td>8</td>
+      <td>9</td>
+      <td>59</td>
+      <td>C:\Users\ph\Desktop\project\outputs\density_maps\TCGA-21-5784-01Z-00-DX1_density_heatmap.png</td>
+    </tr>
+    <tr>
+      <td>TCGA-21-5786-01Z-00-DX1</td>
+      <td>289</td>
+      <td>8</td>
+      <td>10</td>
+      <td>64</td>
+      <td>C:\Users\ph\Desktop\project\outputs\density_maps\TCGA-21-5786-01Z-00-DX1_density_heatmap.png</td>
+    </tr>
+    <tr>
+      <td>TCGA-38-6178-01Z-00-DX1</td>
+      <td>404</td>
+      <td>8</td>
+      <td>14</td>
+      <td>63</td>
+      <td>C:\Users\ph\Desktop\project\outputs\density_maps\TCGA-38-6178-01Z-00-DX1_density_heatmap.png</td>
+    </tr>
+    <tr>
+      <td>TCGA-49-4488-01Z-00-DX1</td>
+      <td>359</td>
+      <td>8</td>
+      <td>11</td>
+      <td>64</td>
+      <td>C:\Users\ph\Desktop\project\outputs\density_maps\TCGA-49-4488-01Z-00-DX1_density_heatmap.png</td>
+    </tr>
+    <tr>
+      <td>TCGA-50-5931-01Z-00-DX1</td>
+      <td>467</td>
+      <td>8</td>
+      <td>13</td>
+      <td>64</td>
+      <td>C:\Users\ph\Desktop\project\outputs\density_maps\TCGA-50-5931-01Z-00-DX1_density_heatmap.png</td>
+    </tr>
+    <tr>
+      <td>TCGA-A7-A13E-01Z-00-DX1</td>
+      <td>339</td>
+      <td>8</td>
+      <td>10</td>
+      <td>64</td>
+      <td>C:\Users\ph\Desktop\project\outputs\density_maps\TCGA-A7-A13E-01Z-00-DX1_density_heatmap.png</td>
+    </tr>
+    <tr>
+      <td>TCGA-A7-A13F-01Z-00-DX1</td>
+      <td>259</td>
+      <td>8</td>
+      <td>8</td>
+      <td>63</td>
+      <td>C:\Users\ph\Desktop\project\outputs\density_maps\TCGA-A7-A13F-01Z-00-DX1_density_heatmap.png</td>
+    </tr>
+  </tbody>
+</table>
+    </div>
+
+    <div class="card">
+        <h2>Qualitative Visual Evidence</h2>
+        <p>
+            Each selected case includes overlay visualization, predicted mask, and density heatmap.
+        </p>
+    </div>
+
+    
+    <section class="case-block">
+        <h3>TCGA-AR-A1AK-01Z-00-DX1</h3>
+        <div class="image-grid">
+            
+    <div class="image-card">
+        <h4>Overlay</h4>
+        <img src="../overlays/TCGA-AR-A1AK-01Z-00-DX1_overlay.png" alt="Overlay">
+    </div>
+    
+            
+    <div class="image-card">
+        <h4>Predicted Mask</h4>
+        <img src="../pred_masks/TCGA-AR-A1AK-01Z-00-DX1_pred_mask.png" alt="Predicted Mask">
+    </div>
+    
+            
+    <div class="image-card">
+        <h4>Density Heatmap</h4>
+        <img src="../density/TCGA-AR-A1AK-01Z-00-DX1_density_heatmap.png" alt="Density Heatmap">
+    </div>
+    
+        </div>
+    </section>
+    
+
+    <section class="case-block">
+        <h3>TCGA-38-6178-01Z-00-DX1</h3>
+        <div class="image-grid">
+            
+    <div class="image-card">
+        <h4>Overlay</h4>
+        <img src="../overlays/TCGA-38-6178-01Z-00-DX1_overlay.png" alt="Overlay">
+    </div>
+    
+            
+    <div class="image-card">
+        <h4>Predicted Mask</h4>
+        <img src="../pred_masks/TCGA-38-6178-01Z-00-DX1_pred_mask.png" alt="Predicted Mask">
+    </div>
+    
+            
+    <div class="image-card">
+        <h4>Density Heatmap</h4>
+        <img src="../density/TCGA-38-6178-01Z-00-DX1_density_heatmap.png" alt="Density Heatmap">
+    </div>
+    
+        </div>
+    </section>
+    
+
+    <section class="case-block">
+        <h3>TCGA-HE-7129-01Z-00-DX1</h3>
+        <div class="image-grid">
+            
+    <div class="image-card">
+        <h4>Overlay</h4>
+        <img src="../overlays/TCGA-HE-7129-01Z-00-DX1_overlay.png" alt="Overlay">
+    </div>
+    
+            
+    <div class="image-card">
+        <h4>Predicted Mask</h4>
+        <img src="../pred_masks/TCGA-HE-7129-01Z-00-DX1_pred_mask.png" alt="Predicted Mask">
+    </div>
+    
+            
+    <div class="image-card">
+        <h4>Density Heatmap</h4>
+        <img src="../density/TCGA-HE-7129-01Z-00-DX1_density_heatmap.png" alt="Density Heatmap">
+    </div>
+    
+        </div>
+    </section>
+    
+
+    <section class="case-block">
+        <h3>TCGA-HE-7130-01Z-00-DX1</h3>
+        <div class="image-grid">
+            
+    <div class="image-card">
+        <h4>Overlay</h4>
+        <img src="../overlays/TCGA-HE-7130-01Z-00-DX1_overlay.png" alt="Overlay">
+    </div>
+    
+            
+    <div class="image-card">
+        <h4>Predicted Mask</h4>
+        <img src="../pred_masks/TCGA-HE-7130-01Z-00-DX1_pred_mask.png" alt="Predicted Mask">
+    </div>
+    
+            
+    <div class="image-card">
+        <h4>Density Heatmap</h4>
+        <img src="../density/TCGA-HE-7130-01Z-00-DX1_density_heatmap.png" alt="Density Heatmap">
+    </div>
+    
+        </div>
+    </section>
+    
+
+</body>
+</html>

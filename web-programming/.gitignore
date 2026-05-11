@@ -2,7 +2,7 @@ node_modules/
 __pycache__/
 .venv/
 .env
-outputs/
+# outputs/ kept in repo
 frontend/dist/
 *.db
 *.sqlite

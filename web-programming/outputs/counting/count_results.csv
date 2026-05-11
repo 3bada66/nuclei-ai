@@ -1,0 +1,2 @@
+image_name,predicted_count,ground_truth_count,absolute_error,squared_error
+TCGA-18-5592-01Z-00-DX1,301,294,7,49

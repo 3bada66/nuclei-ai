@@ -1,0 +1,17 @@
+Processed images: 4
+Average MAE: 126.7500
+Average MSE: 27786.2500
+
+Best example:
+Image: TCGA-A7-A13E-01Z-00-DX1
+Predicted count: 249
+Ground truth count: 257
+Absolute error: 8
+Squared error: 64
+
+Worst example:
+Image: TCGA-HE-7130-01Z-00-DX1
+Predicted count: 352
+Ground truth count: 627
+Absolute error: 275
+Squared error: 75625

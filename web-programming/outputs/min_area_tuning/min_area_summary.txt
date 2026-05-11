@@ -1,0 +1,13 @@
+MIN_AREA tuning summary
+Threshold: 0.7
+
+ min_area    mae       mse
+        5  76.25   8269.75
+       10  78.25  18666.25
+       15 165.50  50011.00
+       20 240.25  92578.75
+       25 285.25 120897.25
+       30 316.75 142224.75
+
+Best MIN_AREA by MAE: 5 (MAE=76.2500)
+Best MIN_AREA by MSE: 5 (MSE=8269.7500)
