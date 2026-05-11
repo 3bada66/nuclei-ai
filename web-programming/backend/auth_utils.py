@@ -37,8 +37,8 @@ def validate_password_strength(password: str) -> str:
         raise ValueError(PASSWORD_RULES_MSG)
     return password
 
+import bcrypt as _bcrypt
 from jose import jwt
-from passlib.context import CryptContext
 
 from backend.config import (
     ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -52,17 +52,18 @@ from backend.config import (
     TEMP_TOKEN_EXPIRE_MINUTES,
 )
 
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 # ── Password ──────────────────────────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:
-    return _pwd_ctx.hash(plain)
+    return _bcrypt.hashpw(plain.encode(), _bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_ctx.verify(plain, hashed)
+    try:
+        return _bcrypt.checkpw(plain.encode(), hashed.encode())
+    except Exception:
+        return False
 
 
 # ── JWT ───────────────────────────────────────────────────────────────────────
