@@ -25,6 +25,7 @@ test.describe("Job CRUD", () => {
 
     try {
       const fileInput = page.locator('input[type="file"]');
+      await fileInput.waitFor({ state: "attached", timeout: 10_000 });
       await fileInput.setInputFiles(tmpPath);
 
       const submitBtn = page.getByRole("button", { name: /analyze|upload|submit/i });

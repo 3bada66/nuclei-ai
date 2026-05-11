@@ -30,13 +30,16 @@ test.describe("Auth flows", () => {
   });
 
   test("login with wrong password shows error", async ({ page }) => {
-    await page.goto("/login");
+    await page.goto("/login", { waitUntil: "networkidle" });
     await page.getByLabel(/email/i).fill("nobody@test.com");
     await page.getByLabel(/password/i).fill("wrongpassword");
-    await page.getByRole("button", { name: /sign in/i }).click();
-    await expect(page.getByText(/invalid|incorrect|error/i)).toBeVisible({
-      timeout: 5_000,
-    });
+    // Wait for the API response before asserting the error div appeared
+    const [response] = await Promise.all([
+      page.waitForResponse(r => r.url().includes("/auth/login"), { timeout: 10_000 }),
+      page.getByRole("button", { name: /sign in/i }).click(),
+    ]);
+    // Backend returns 401 with "Invalid credentials." — check the error element by class
+    await expect(page.locator(".error").first()).toBeVisible({ timeout: 5_000 });
   });
 
   test("unauthenticated user redirected from /dashboard to /login", async ({ page }) => {
@@ -46,8 +49,11 @@ test.describe("Auth flows", () => {
 
   test("logout clears session and redirects to login", async ({ page }) => {
     const ts = Date.now();
+    // Clear any previous auth state from earlier tests
+    await page.goto("/");
+    await page.evaluate(() => localStorage.clear());
     // Register + login via UI
-    await page.goto("/register");
+    await page.goto("/register", { waitUntil: "networkidle" });
     await page.getByLabel(/username/i).fill(`logoutuser${ts}`);
     await page.getByLabel(/email/i).fill(`logoutuser${ts}@test.com`);
     await page.getByLabel(/password/i).fill("Password123!");
